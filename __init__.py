@@ -1,11 +1,11 @@
 """
 High Frequency Mask — ComfyUI custom node
 
-weiss = Struktur wird gesampelt, schwarz = Flaeche bleibt original.
-Drei Regler: staerke, groesse, weichheit. Maske erscheint direkt im Node.
-Optionaler LATENT-Eingang setzt die Noise-Mask gleich mit.
+White = textured, gets sampled. Black = flat, stays as it is.
+Four sliders: strength, grow, feather, grain_filter. The mask previews in the node.
+An optional LATENT input gets the mask attached as its noise mask.
 
-Alles in torch -> laeuft auf der GPU und verarbeitet ganze Batches.
+All torch -> runs on the GPU and handles whole batches.
 """
 
 import os
@@ -16,7 +16,7 @@ from PIL import Image
 
 import folder_paths
 
-try:                                    # auf der GPU rechnen, wenn moeglich
+try:                                    # run on the GPU where possible
     import comfy.model_management as _mm
     def _device():
         return _mm.get_torch_device()
@@ -35,7 +35,7 @@ def _gauss1d(sigma, device, dtype):
 
 
 def _blur(x, sigma):
-    """separabler Gauss, B1HW"""
+    """Separable Gaussian, B1HW."""
     if sigma < 0.3:
         return x
     k = _gauss1d(sigma, x.device, x.dtype)
@@ -46,7 +46,7 @@ def _blur(x, sigma):
 
 
 def _dilate(x, px):
-    """Maximum-Filter ueber max_pool2d, kachelweise fuer grosse Kernel"""
+    """Maximum filter via max_pool2d, stepped for large kernels."""
     if px < 1:
         return x
     rest = int(px)
@@ -76,18 +76,18 @@ class HighFrequencyMask:
         "SETTINGS FOR UPSCALING. The shipped defaults are tuned too coarse for this "
         "job -- they let roughly three times more through in flat areas than needed. "
         "Set radius_override to about a third of the automatic radius (5-7 at 1024px, "
-        "10-14 at 2048px) and entrauschen to 0 unless the source is grainy or JPEG. "
+        "10-14 at 2048px) and grain_filter to 0 unless the source is grainy or JPEG. "
         "Measured on ComfyUI generations that cuts the flat-area leak by 2x to 6x -- the "
         "more flat area, the bigger the win -- while keeping MORE real texture. Add "
-        "weichheit 0.5-1.0 so the mask edge does "
-        "not leave a seam, and groesse 0.5-1.0 so real detail keeps a margin.\n\n"
+        "feather 0.5-1.0 so the mask edge does "
+        "not leave a seam, and grow 0.5-1.0 so real detail keeps a margin.\n\n"
         "Going finer than a third buys nothing -- protection plateaus there while "
         "texture retention starts dropping.\n\n"
-        "TWO THINGS THAT MISLEAD. entrauschen defaults to 1.0, which smooths away real "
+        "TWO THINGS THAT MISLEAD. grain_filter defaults to 1.0, which smooths away real "
         "texture on clean renders before it is ever measured. And black_override and "
         "white_override are measured on the HIGH-PASS image, not on brightness: useful "
         "values sit near 0-30, not 0-255, and setting either one switches off the "
-        "automatic levels so staerke stops mattering.\n\n"
+        "automatic levels so strength stops mattering.\n\n"
         "The info output reports the values actually used, so you can read them off a "
         "good frame and pin them for a whole batch or video."
     )
@@ -103,6 +103,7 @@ class HighFrequencyMask:
         "high frequency mask", "frequency separation", "structure mask",
         "selective sampling", "noise mask",
         # German
+        # German search terms, so the node is findable either way
         "hochfrequenz", "detailmaske", "strukturmaske", "texturmaske",
         "flaechen schuetzen", "farbverschiebung",
     ]
@@ -121,22 +122,22 @@ class HighFrequencyMask:
         return {
             "required": {
                 "image": ("IMAGE", {"tooltip": "The image to analyse. Only its texture is used, never its colour."}),
-                "staerke": ("FLOAT", {"default": 1.00, "min": 0.40, "max": 2.00, "step": 0.02,
-                                      "tooltip": "How much of the image counts as detail. Higher = more gets sampled, less stays flat. Has little effect above about 1.4."}),
-                "groesse": ("FLOAT", {"default": 1.00, "min": -1.00, "max": 4.00, "step": 0.05,
-                                      "tooltip": "Expands the white areas so detail keeps a safety margin. Negative values shrink the mask instead."}),
-                "weichheit": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
-                                        "tooltip": "Softness of the edge between white and black. Higher = longer fade and no visible mask border."}),
-                "entrauschen": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
-                                          "tooltip": "Smooths grain and JPEG artifacts before analysis, so a noisy sky is still recognised as flat. Set to 0 for clean renders and upscales -- on a noise-free source it removes real texture and weakens the mask."}),
+                "strength": ("FLOAT", {"default": 1.00, "min": 0.40, "max": 2.00, "step": 0.02,
+                                       "tooltip": "How much of the image counts as detail. Higher = more gets sampled, less stays flat. Has little effect above about 1.4."}),
+                "grow": ("FLOAT", {"default": 1.00, "min": -1.00, "max": 4.00, "step": 0.05,
+                                   "tooltip": "Expands the white areas so detail keeps a safety margin. Negative values shrink the mask instead."}),
+                "feather": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
+                                      "tooltip": "Softness of the edge between white and black. Higher = longer fade and no visible mask border."}),
+                "grain_filter": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
+                                           "tooltip": "Smooths grain and JPEG artifacts before analysis, so a noisy sky is still recognised as flat. Set to 0 for clean renders and upscales -- on a noise-free source it removes real texture and weakens the mask."}),
                 "invert": ("BOOLEAN", {"default": False, "tooltip": "Swaps black and white: protects the detail and samples the flat areas instead."}),
             },
             "optional": {
                 "samples": ("LATENT", {"tooltip": "Optional. If connected, the mask is resized to the latent and attached as its noise mask."}),
                 "radius_override": ("INT", {"default": 0, "min": 0, "max": 400,
-                                            "tooltip": "High-pass radius in px, deciding which size of structure counts as detail. 0 = automatic from the image size (min(W,H)/52). Smaller finds finer texture. Very large values combined with high weichheit will error."}),
+                                            "tooltip": "High-pass radius in px, deciding which size of structure counts as detail. 0 = automatic from the image size (min(W,H)/52). Smaller finds finer texture. Very large values combined with a high feather will error."}),
                 "black_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
-                                             "tooltip": "Below this, an area counts as flat. Measured on the HIGH-PASS image, not on brightness -- typical values are 0 to 10. 0 means automatic. Setting this or white_override disables staerke."}),
+                                             "tooltip": "Below this, an area counts as flat. Measured on the HIGH-PASS image, not on brightness -- typical values are 0 to 10. 0 means automatic. Setting this or white_override disables strength."}),
                 "white_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
                                              "tooltip": "Above this, an area counts as full detail. Also high-pass contrast -- typical values are 8 to 40. 0 means automatic. Setting black_override alone falls back to 255 here and yields a near-empty mask."}),
             },
@@ -148,23 +149,23 @@ class HighFrequencyMask:
     OUTPUT_NODE = True
     CATEGORY = "mask"
 
-    def build(self, image, staerke, groesse, weichheit, entrauschen, invert,
+    def build(self, image, strength, grow, feather, grain_filter, invert,
               samples=None, radius_override=0, black_override=0.0, white_override=0.0):
 
         src_dev = image.device
         dev = _device()
         x = image.movedim(-1, 1).to(device=dev, dtype=torch.float32)   # B,C,H,W
-        g = x.mean(dim=1, keepdim=True)                      # B,1,H,W  graustufen
+        g = x.mean(dim=1, keepdim=True)                      # B,1,H,W  greyscale
         B, _, H, W = g.shape
 
-        # Pixelmasse skalieren mit der Aufloesung: gleiche Wirkung bei 816 wie bei 1632
+        # Pixel sizes scale with resolution, so 816 and 1632 behave the same
         base = radius_override if radius_override > 0 else max(4, int(round(min(W, H) / 52.0)))
 
-        # Vorabglaettung gegen Sensorrauschen / JPEG, bevor analysiert wird
-        if entrauschen > 0:
-            g = _blur(g, sigma=max(0.3, base / 12.0 * entrauschen))
+        # Pre-smooth against sensor grain / JPEG before anything is measured
+        if grain_filter > 0:
+            g = _blur(g, sigma=max(0.3, base / 12.0 * grain_filter))
 
-        # Hochpass: Bild minus Tiefpass, negative Haelfte verworfen (nur helle Kantenseite)
+        # High-pass: image minus low-pass, negative half dropped (bright edge side only)
         hp = (g - _blur(g, sigma=base / 2.0)).clamp(min=0) * 3.0
         hp = hp.clamp(0, 1)
 
@@ -177,18 +178,18 @@ class HighFrequencyMask:
                 blk = black_override / 255.0
                 wht = max(blk + 0.03, (white_override / 255.0) if white_override > 0 else 1.0)
             else:
-                pw = float(np.clip(99.0 - (staerke - 0.40) * (99.0 - 62.0) / 1.60, 62.0, 99.0))
-                pb = float(np.clip(68.0 + (1.00 - staerke) * 8.0, 50.0, 90.0))
+                pw = float(np.clip(99.0 - (strength - 0.40) * (99.0 - 62.0) / 1.60, 62.0, 99.0))
+                pb = float(np.clip(68.0 + (1.00 - strength) * 8.0, 50.0, 90.0))
                 blk = torch.quantile(flat.float(), pb / 100.0).item()
                 wht = max(blk + 0.03, torch.quantile(flat.float(), pw / 100.0).item())
 
             m = ((h - blk) / max(wht - blk, 1e-6)).clamp(0, 1)
 
-            px = int(round(base * 1.5 * abs(groesse)))
+            px = int(round(base * 1.5 * abs(grow)))
             if px >= 1:
-                m = _dilate(m, px) if groesse > 0 else _erode(m, px)
+                m = _dilate(m, px) if grow > 0 else _erode(m, px)
 
-            sig = base * 0.5 * weichheit
+            sig = base * 0.5 * feather
             if sig >= 0.3:
                 m = _blur(m, sig).clamp(0, 1)
 
@@ -202,11 +203,11 @@ class HighFrequencyMask:
         mask = torch.cat(masks, 0)[:, 0].to(src_dev)          # B,H,W
 
         s0 = stats[0]
-        info = (f"{W}x{H} x{B} | radius {base} | grow {int(round(base * 1.5 * groesse))}px | "
-                f"blur {base * 0.5 * weichheit:.0f}px | black {s0[2]:.0f} white {s0[3]:.0f} | "
-                f"oben {s0[0]:.3f} | mittel {s0[1]:.3f}")
+        info = (f"{W}x{H} x{B} | radius {base} | grow {int(round(base * 1.5 * grow))}px | "
+                f"blur {base * 0.5 * feather:.0f}px | black {s0[2]:.0f} white {s0[3]:.0f} | "
+                f"top {s0[0]:.3f} | mean {s0[1]:.3f}")
         if B > 1:
-            info += " | " + " ".join(f"[{i + 1}] oben {s[0]:.3f}" for i, s in enumerate(stats))
+            info += " | " + " ".join(f"[{i + 1}] top {s[0]:.3f}" for i, s in enumerate(stats))
 
         preview = mask.unsqueeze(-1).repeat(1, 1, 1, 3)
 

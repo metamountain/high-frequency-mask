@@ -61,7 +61,7 @@ def test_latent_batch_mismatch():
 
 
 def test_sensitivity_is_compressed_at_the_top():
-    """staerke keeps working across its whole range, but very unevenly.
+    """strength keeps working across its whole range, but very unevenly.
 
     Measured on this render: 0.4 -> 1.0 moves the texture level by 0.168,
     while 1.4 -> 2.0 moves it by 0.018. Nearly all the useful travel sits in

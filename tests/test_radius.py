@@ -56,7 +56,7 @@ def test_protection_plateaus_below_a_third():
 
 
 def test_grain_suppression_hurts_a_clean_render():
-    """entrauschen defaults to 1.0 and costs protection on noise-free sources."""
+    """grain_filter defaults to 1.0 and costs protection on noise-free sources."""
     _, node = load_node()
     on = protection(node, radius_override=radius_px(1.0))
     off = protection(node, grain=0.0, radius_override=radius_px(1.0))

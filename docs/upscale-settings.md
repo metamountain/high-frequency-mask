@@ -28,7 +28,7 @@ colour.
 
 ## Radius: smaller is strictly better for protection
 
-`entrauschen = 0`, at 1024px. Monotone on both fixtures:
+`grain_filter = 0`, at 1024px. Monotone on both fixtures:
 
 | radius | px | spraycrete leak | degenerator leak | texture kept | degenerator protected |
 |---|---|---|---|---|---|
@@ -52,7 +52,7 @@ the whole reason to use this node.
 
 ## Defaults vs tuned
 
-Tuned = radius 0.35×, `entrauschen` 0, `weichheit` 1.0:
+Tuned = radius 0.35×, `grain_filter` 0, `feather` 1.0:
 
 | fixture | defaults | tuned | improvement |
 |---|---|---|---|
@@ -64,13 +64,13 @@ not a trade-off — the defaults are simply mistuned for upscale protection.
 
 ## Grain suppression: off, unless the source is actually grainy
 
-`entrauschen` defaults to 1.0 and is scaled by the same `base` as the radius, so it
+`grain_filter` defaults to 1.0 and is scaled by the same `base` as the radius, so it
 smooths the image *before* anything is measured. At the auto radius on spraycrete:
 
 | | flat leak | texture kept | protected |
 |---|---|---|---|
-| `entrauschen = 1.0` | .115 | .298 | 81.6% |
-| `entrauschen = 0` | .073 | .377 | 86.5% |
+| `grain_filter = 1.0` | .115 | .298 | 81.6% |
+| `grain_filter = 0` | .073 | .377 | 86.5% |
 
 60% more leak **and** less real texture. It earns its keep on grainy photographs and
 JPEG sources; on ComfyUI generations and clean upscales, set it to 0.
@@ -79,7 +79,7 @@ JPEG sources; on ComfyUI generations and clean upscales, set it to 0.
 
 A hard mask edge shows as a seam after an upscale pass. At 0.35× radius on spraycrete:
 
-| `weichheit` | flat leak |
+| `feather` | flat leak |
 |---|---|
 | 0.0 | .039 |
 | 0.5 | .041 |
@@ -88,12 +88,12 @@ A hard mask edge shows as a seam after an upscale pass. At 0.35× radius on spra
 
 0.5–1.0 is a good trade. 2.0 starts eating the protection you tuned for.
 
-## `staerke` is alive but very uneven
+## `strength` is alive but very uneven
 
 Contrary to an earlier reading taken from a synthetic fixture, the slider works across
 its whole range on real images — coverage climbs .078 → .308 from 0.4 to 2.0. But:
 
-| staerke | 0.4 | 0.8 | 1.0 | 1.2 | 1.4 | 1.6 | 1.8 | 2.0 |
+| strength | 0.4 | 0.8 | 1.0 | 1.2 | 1.4 | 1.6 | 1.8 | 2.0 |
 |---|---|---|---|---|---|---|---|---|
 | texture | .129 | .261 | .297 | .326 | .341 | .348 | .354 | .359 |
 | coverage | .078 | .181 | .219 | .255 | .276 | .287 | .297 | .308 |

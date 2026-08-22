@@ -18,14 +18,14 @@ Measured on `tests/assets/spraycrete.png` at 1024px:
 | | flat leak | texture kept | flat fully protected |
 |---|---|---|---|
 | shipped defaults | .116 | .297 | 81.5% |
-| radius 0.35×, `entrauschen` 0 | **.038** | **.417** | **90.4%** |
+| radius 0.35×, `grain_filter` 0 | **.038** | **.417** | **90.4%** |
 
 Two independent causes, both worth fixing in code rather than documentation:
 
 - **The auto radius is ~3× too coarse.** Leak falls monotonically with radius and
   plateaus below 0.3×; texture retention peaks at 0.25–0.35×. So `min(W,H)/52` should
   be closer to `min(W,H)/150`. In px: 5–7 at 1024, 10–14 at 2048.
-- **`entrauschen` defaults to 1.0**, which pre-smooths the image before anything is
+- **`grain_filter` defaults to 1.0**, which pre-smooths the image before anything is
   measured. On clean renders that costs 60% more leak *and* removes real texture. It
   should default to 0 and only be raised for grainy or JPEG sources.
 
@@ -38,13 +38,13 @@ These are not independently tunable:
 
 | consumer | value | line |
 |---|---|---|
-| grain pre-blur sigma | `base / 12 * entrauschen` | `:113` |
+| grain pre-blur sigma | `base / 12 * grain_filter` | `:113` |
 | high-pass sigma | `base / 2` | `:116` |
-| grow/shrink px | `base * 1.5 * abs(groesse)` | `:135` |
-| feather sigma | `base * 0.5 * weichheit` | `:139` |
+| grow/shrink px | `base * 1.5 * abs(grow)` | `:135` |
+| feather sigma | `base * 0.5 * feather` | `:139` |
 
 This coupling is why turning the radius down also turns grain suppression down — the
-two "fixes" above are partly the same fix. Decoupling `entrauschen` from `base` is the
+two "fixes" above are partly the same fix. Decoupling `grain_filter` from `base` is the
 single highest-value change to the maths.
 
 ## Units trap: levels are high-pass contrast, not brightness
@@ -53,7 +53,7 @@ single highest-value change to the maths.
 land near `black 5..10 / white 12..76`, i.e. in the bottom 10–30% of the nominal range.
 
 They are also a hidden mode switch: if *either* is > 0 the quantile autolevel is
-bypassed entirely and `staerke` becomes a no-op. Black-only input silently falls back
+bypassed entirely and `strength` becomes a no-op. Black-only input silently falls back
 to `white = 255` and yields a near-empty mask.
 
 ## Known breakage (reproduced in `tests/test_regressions.py`)
@@ -61,13 +61,13 @@ to `white = 255` and yields a near-empty mask.
 - **`torch.quantile` caps at 2^24 = 16,777,216 elements** (`:130`). Images at or above
   ~4096×4096 raise `RuntimeError: quantile() input tensor is too large`. **Reachable
   on a normal upscale** — two files in this install's `input/` already exceed it.
-- **Reflect-pad overflow** (`:141`). `_blur` needs `1.5 * base * weichheit < min(W,H)`.
+- **Reflect-pad overflow** (`:141`). `_blur` needs `1.5 * base * feather < min(W,H)`.
   Clamp `r` to `min(W,H) - 1`.
 - **Latent batch mismatch falls through** (`:167`). The guard only handles
   `mm.shape[0] == 1`; for `1 < mask_batch < latent_batch` the `mm[:sh[0]]` slice is a
   no-op and a wrong-sized `noise_mask` reaches the sampler.
 
-## Corrected: `staerke` is not dead above 1.4
+## Corrected: `strength` is not dead above 1.4
 
 An earlier reading — that the slider stops working above ~1.4 — came from a synthetic
 test chart whose high-pass histogram was far more zero-inflated than real images. On
