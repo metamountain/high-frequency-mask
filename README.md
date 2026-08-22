@@ -34,6 +34,21 @@ hallucinate into and shift the colour of:
 Two to six times less leak *and* more real texture retained — not a trade-off. The
 more flat area an image has, the more the coarse default costs you.
 
+## How it finds texture
+
+`detector` chooses between two ways of measuring detail:
+
+- **`guided`** (default) -- an edge-preserving low-pass, so strong edges do not
+  spill a halo of false detail into the flat areas beside them. Sky next to a
+  cliff and glass inside a window frame stay protected.
+- **`high pass`** -- the original plain Gaussian difference, kept so older
+  results can be reproduced.
+
+Measured on the test renders at `grow 0`: the guided detector leaks **41x less**
+into flat areas next to strong edges (.009 vs .371) while finding *more* real
+texture (.515 vs .350). Full tables in
+[docs/upscale-settings.md](docs/upscale-settings.md).
+
 ## Inputs
 
 > These are the current widget names, which are German. English names

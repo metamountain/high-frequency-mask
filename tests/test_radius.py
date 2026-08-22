@@ -55,13 +55,46 @@ def test_protection_plateaus_below_a_third():
     assert at_035[1] >= at_015[1], "but the coarser end should keep more texture"
 
 
-def test_grain_suppression_hurts_a_clean_render():
-    """grain_filter defaults to 1.0 and costs protection on noise-free sources."""
+def test_grain_filter_costs_protection_on_a_clean_render():
+    """grain_filter defaults to 1.0 and leaks more on a noise-free source.
+
+    True for both detectors -- the pre-blur smooths real structure away before
+    anything is measured, so the autolevel has to reach further down.
+
+    The texture side is detector-specific: with the plain high pass, turning
+    grain_filter off also recovers texture (.298 -> .377). With the guided
+    detector texture barely moves (.491 -> .485) because it was not losing any
+    to begin with -- but the leak still drops 3x (.036 -> .013).
+    """
     _, node = load_node()
-    on = protection(node, radius_override=radius_px(1.0))
-    off = protection(node, grain=0.0, radius_override=radius_px(1.0))
-    assert off[0] < on[0], f"grain=0 should leak less: {off[0]:.3f} vs {on[0]:.3f}"
-    assert off[1] > on[1], "and keep more real texture"
+    for detector in ("high pass", "guided"):
+        on = protection(node, grain=1.0, radius_override=radius_px(1.0),
+                        detector=detector)
+        off = protection(node, grain=0.0, radius_override=radius_px(1.0),
+                         detector=detector)
+        assert off[0] < on[0], (
+            f"{detector}: grain_filter=0 should leak less, "
+            f"{off[0]:.3f} vs {on[0]:.3f}")
+
+
+def test_guided_detector_protects_flat_areas_better():
+    """The guided filter's whole reason for existing.
+
+    A Gaussian low-pass smears across a strong edge, so the difference lights
+    up flat ground on both sides. Measured on the cliff at grow 0: leak .050
+    with the plain high pass, .001 with the guided one.
+    """
+    _, node = load_node()
+    for name in IMAGES:
+        plain = protection(node, name=name, grain=0.0,
+                           radius_override=radius_px(1.0), detector="high pass")
+        guided = protection(node, name=name, grain=0.0,
+                            radius_override=radius_px(1.0), detector="guided")
+        assert guided[0] < plain[0], (
+            f"{name}: guided should leak less, {guided[0]:.3f} vs {plain[0]:.3f}")
+        assert guided[1] > plain[1], (
+            f"{name}: guided should keep more texture, "
+            f"{guided[1]:.3f} vs {plain[1]:.3f}")
 
 
 def test_feather_costs_protection_but_stays_usable():

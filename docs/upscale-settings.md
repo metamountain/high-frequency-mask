@@ -26,6 +26,40 @@ Flat and textured regions are separated by local standard deviation per 8px bloc
 bit the mask lets through there is an upscaler free to hallucinate detail and drift
 colour.
 
+## Detector: guided beats the plain high pass at everything
+
+Same autolevel, `grow 0`, `feather 0` -- only the detector differs. "Halo leak"
+is the mask level over flat blocks within 24px of a strong edge, which is the
+sky-beside-the-cliff and inside-a-window case.
+
+| detector | halo (cliff) | halo (concrete) | texture kept |
+|---|---|---|---|
+| rectified high pass (original) | .371 | .185 | .350 / .377 |
+| both edge sides (`.abs()`) | .184 | .077 | .537 / .535 |
+| multi-scale local std | .179 | .116 | **.557** |
+| **guided filter** | **.009** | **.027** | .515 / .485 |
+| guided + multi-scale | .026 | .057 | .458 |
+
+Two things worth stating plainly. The original detector was the **worst** of
+everything tested -- rectifying to one side of the edge threw away half the
+signal. And combining guided with multi-scale is *worse* than guided alone, so
+the clever hybrid is not the answer.
+
+The advantage shrinks as `grow` grows, because dilation floods the halo zone
+regardless of detector:
+
+| grow | halo: plain -> guided | white: plain -> guided |
+|---|---|---|
+| 0.15 (4px) | .592 -> .287 | 20.3% -> **41.8%** |
+| 0.25 (8px) | .760 -> .456 | 50.7% -> 55.2% |
+| 0.5 (15px) | .927 -> .739 | 62.8% -> 65.3% |
+| 1.0 (30px) | .999 -> .986 | 72.9% -> 72.7% |
+
+At every value the guided detector produces *more* white, not less.
+
+Reference: [He et al., Guided Image
+Filtering](https://www.sensetime.com/xo/profile/upload/2024/05/23/2012%20Guided%20Image%20Filtering_20240523184437A013.pdf)
+
 ## Radius: smaller is strictly better for protection
 
 `grain_filter = 0`, at 1024px. Monotone on both fixtures:
