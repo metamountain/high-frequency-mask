@@ -11,6 +11,46 @@ This framing matters for every decision here. The metric is not "does the mask f
 texture" — it is **how much leaks through in flat regions**, because every bit of leak
 is an upscaler free to hallucinate. Optimise for protection, not for coverage.
 
+## The detector: guided filter, not a plain high pass
+
+The original `g - gaussian_blur(g)` had two problems, both measured:
+
+1. **It rectified.** `.clamp(min=0)` kept only the bright side of every edge,
+   throwing away half the signal. Using `.abs()` alone lifts texture retention
+   from .350 to .537 and halves the halo.
+2. **A Gaussian low-pass cannot tell an edge from texture.** It smears straight
+   across a strong edge, so the difference lights up flat ground on BOTH sides --
+   a halo. That is the pale glow in sky beside a cliff, and across the glass
+   inside a window frame. It is the single largest source of leak.
+
+Replacing the low-pass with a self-guided edge-preserving filter fixes both.
+Measured at `grow 0`, same autolevel:
+
+| detector | halo leak | texture kept |
+|---|---|---|
+| rectified high pass (original) | .371 | .350 |
+| both edge sides (`.abs()`) | .184 | .537 |
+| **guided filter** | **.009** | **.515** |
+
+41x less halo on the cliff, 7x on the concrete, *while finding more texture*.
+It is not a protection/detail trade -- the original was losing on both counts.
+
+**The advantage decays as `grow` rises**, because dilation floods the halo zone
+by itself:
+
+| grow | halo: plain -> guided | white: plain -> guided |
+|---|---|---|
+| 0.15 (4px) | .592 -> .287 (2.1x) | 20.3% -> **41.8%** |
+| 0.5 (15px) | .927 -> .739 (1.3x) | 62.8% -> 65.3% |
+| 1.0 (30px) | .999 -> .986 (1.0x) | 72.9% -> 72.7% |
+
+So the detector matters most at low `grow`. At every setting it yields *more*
+white, never less -- it blocks smarter, not harder.
+
+Things that did NOT work: combining guided with multi-scale is worse than guided
+alone (.026 vs .009 -- over-suppression), and subtracting a gradient term from
+local std is worse than doing nothing (.654).
+
 ## The defaults are wrong for this job
 
 Measured on `tests/assets/spraycrete.png` at 1024px:
