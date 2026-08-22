@@ -27,6 +27,18 @@ Everything runs in torch on the GPU and handles batches.
 
 Outputs: `mask`, `mask_preview` (as IMAGE), `latent`, `info`.
 
+## Finding it, and getting help in the node
+
+Double-click the canvas and search any of these -- **detail mask**, **texture mask**,
+**high pass**, **high frequency**, **frequency separation**, **skin mask**, **sky
+mask**, **structure mask**, or the German **Detailmaske** / **Strukturmaske** /
+**Hochfrequenz**. 25 aliases in total, so you do not have to remember the node's name.
+It lives under **mask** in the category menu.
+
+Hovering any input shows what it does in plain English, the outputs are documented
+too, and the node's own help panel explains radius choice and the two settings that
+usually trip people up. Nothing was renamed, so existing workflows keep their values.
+
 ## Choosing a radius
 
 The high-pass radius decides *which size of structure* counts as detail, and there is

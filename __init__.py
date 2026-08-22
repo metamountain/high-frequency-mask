@@ -65,28 +65,66 @@ def _erode(x, px):
 
 class HighFrequencyMask:
 
+    DESCRIPTION = (
+        "Builds a mask from an image's texture: white where there is detail, black "
+        "where the image is flat. Feed it to a sampler and only the textured regions "
+        "get resampled -- skies, walls and skin stay exactly as they were. Connect a "
+        "LATENT and the mask is attached as its noise mask automatically.\n\n"
+        "CHOOSING A RADIUS. radius_override decides which SIZE of structure counts as "
+        "detail. 0 picks it from the image size (min(W,H)/52), which targets roughly "
+        "16px structures. Finer texture wants a smaller radius: about 0.5x for skin, "
+        "fabric or concrete aggregate, 0.7x for foliage, 2x and up for large shapes.\n\n"
+        "TWO THINGS THAT SURPRISE PEOPLE. (1) entrauschen defaults to 1.0. On clean "
+        "renders and upscales that smooths away real texture before it is ever "
+        "measured -- set it to 0 unless the source is grainy or JPEG. (2) "
+        "black_override and white_override are measured on the HIGH-PASS image, not on "
+        "brightness: useful values sit near 0-30, not 0-255. Setting either one also "
+        "switches off the automatic levels, which makes staerke do nothing.\n\n"
+        "The info output reports the values actually used, so you can read them off a "
+        "good frame and pin them for the rest of a batch."
+    )
+
+    SEARCH_ALIASES = [
+        "detail mask", "texture mask", "high pass", "highpass", "high frequency",
+        "high frequency mask", "frequency separation", "detail detection",
+        "skin mask", "skin texture", "foliage mask", "sky mask", "flat area mask",
+        "smooth area", "structure mask", "edge mask", "sharpen mask",
+        "detailer mask", "selective sampling", "noise mask", "denoise mask",
+        "hochfrequenz", "detailmaske", "strukturmaske", "texturmaske",
+    ]
+
+    OUTPUT_TOOLTIPS = (
+        "The finished mask. White is sampled, black stays original.",
+        "The same mask as an IMAGE, for chaining into Preview, Save or a compositor.",
+        "The input latent with the mask attached as its noise mask. Only meaningful "
+        "when the samples input is connected.",
+        "Text readout of the values actually used: resolution, radius, grow and blur "
+        "in px, the black and white points, and the mask level at the top of the frame.",
+    )
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image": ("IMAGE",),
+                "image": ("IMAGE", {"tooltip": "The image to analyse. Only its texture is used, never its colour."}),
                 "staerke": ("FLOAT", {"default": 1.00, "min": 0.40, "max": 2.00, "step": 0.02,
-                                      "tooltip": "wieviel als Detail gilt. hoeher = mehr wird gesampelt"}),
+                                      "tooltip": "How much of the image counts as detail. Higher = more gets sampled, less stays flat. Has little effect above about 1.4."}),
                 "groesse": ("FLOAT", {"default": 1.00, "min": -1.00, "max": 4.00, "step": 0.05,
-                                      "tooltip": "Maske ausdehnen. negativ = schrumpfen"}),
+                                      "tooltip": "Expands the white areas so detail keeps a safety margin. Negative values shrink the mask instead."}),
                 "weichheit": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
-                                        "tooltip": "Kantenweichheit der Uebergaenge"}),
+                                        "tooltip": "Softness of the edge between white and black. Higher = longer fade and no visible mask border."}),
                 "entrauschen": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
-                                          "tooltip": "Vorabglaettung gegen Korn und JPEG. hoeher = Himmel wird "
-                                                     "zuverlaessiger als Flaeche erkannt"}),
-                "invert": ("BOOLEAN", {"default": False}),
+                                          "tooltip": "Smooths grain and JPEG artifacts before analysis, so a noisy sky is still recognised as flat. Set to 0 for clean renders and upscales -- on a noise-free source it removes real texture and weakens the mask."}),
+                "invert": ("BOOLEAN", {"default": False, "tooltip": "Swaps black and white: protects the detail and samples the flat areas instead."}),
             },
             "optional": {
-                "samples": ("LATENT",),
+                "samples": ("LATENT", {"tooltip": "Optional. If connected, the mask is resized to the latent and attached as its noise mask."}),
                 "radius_override": ("INT", {"default": 0, "min": 0, "max": 400,
-                                            "tooltip": "0 = automatisch aus der Bildgroesse"}),
-                "black_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0}),
-                "white_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0}),
+                                            "tooltip": "High-pass radius in px, deciding which size of structure counts as detail. 0 = automatic from the image size (min(W,H)/52). Smaller finds finer texture. Very large values combined with high weichheit will error."}),
+                "black_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
+                                             "tooltip": "Below this, an area counts as flat. Measured on the HIGH-PASS image, not on brightness -- typical values are 0 to 10. 0 means automatic. Setting this or white_override disables staerke."}),
+                "white_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
+                                             "tooltip": "Above this, an area counts as full detail. Also high-pass contrast -- typical values are 8 to 40. 0 means automatic. Setting black_override alone falls back to 255 here and yields a near-empty mask."}),
             },
         }
 
