@@ -10,6 +10,10 @@ Everything runs in torch on the GPU and handles batches.
 
 ## Inputs
 
+> These are the current widget names, which are German. English names
+> (`sensitivity`, `grow`, `feather`, `grain_suppress`, `highpass_radius`) are the
+> next change, together with sliders and proper tooltips.
+
 | input | what it does |
 |---|---|
 | `staerke` | how much of the image counts as detail |
