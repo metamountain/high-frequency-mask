@@ -94,6 +94,7 @@ class HighFrequencyMask:
         "Protects flat areas during an upscale or refine pass. White where the image "
         "already has texture, black where it is flat -- feed it to the sampler as a "
         "noise mask and skies, walls, panels and skin are left alone.\n\n"
+        "HOW TO WIRE IT. Send the mask output into Set Latent Noise Mask, together with the latent you are about to resample, and feed that into the sampler. That is the intended use. The node can also attach the mask itself if you connect a latent to the samples input, but Set Latent Noise Mask is clearer to read in a graph and is what these settings were tuned against.\n\n"
         "WHAT IT FIXES. Upscalers invent detail in surfaces that should stay smooth "
         "and drift the colour while doing it. Flux Klein is especially prone to both. "
         "Masking the flat regions out stops the model touching them at all, so they "
@@ -134,7 +135,7 @@ class HighFrequencyMask:
     ]
 
     OUTPUT_TOOLTIPS = (
-        "The finished mask. White is sampled, black stays original.",
+        "The finished mask. White is sampled, black stays original. Send this into Set Latent Noise Mask together with your latent.",
         "The same mask as an IMAGE, for chaining into Preview, Save or a compositor.",
         "The input latent with the mask attached as its noise mask. Only meaningful "
         "when the samples input is connected.",
@@ -149,7 +150,7 @@ class HighFrequencyMask:
                 "image": ("IMAGE", {"tooltip": "The image to analyse. Only its texture is used, never its colour."}),
                 "strength": ("FLOAT", {"default": 1.00, "min": 0.40, "max": 2.00, "step": 0.02,
                                        "tooltip": "How much of the image counts as detail. Higher = more gets sampled, less stays flat. Has little effect above about 1.4."}),
-                "grow": ("FLOAT", {"default": 1.00, "min": -1.00, "max": 4.00, "step": 0.05,
+                "grow": ("FLOAT", {"default": 0.50, "min": -1.00, "max": 4.00, "step": 0.05,
                                    "tooltip": "Expands the white areas so detail keeps a safety margin. Negative values shrink the mask instead."}),
                 "feather": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
                                       "tooltip": "Softness of the edge between white and black. Higher = longer fade and no visible mask border."}),
@@ -157,6 +158,7 @@ class HighFrequencyMask:
                                            "tooltip": "Smooths grain and JPEG artifacts before analysis, so a noisy sky is still recognised as flat. Set to 0 for clean renders and upscales -- on a noise-free source it removes real texture and weakens the mask."}),
                 "invert": ("BOOLEAN", {"default": False, "tooltip": "Swaps black and white: protects the detail and samples the flat areas instead."}),
             },
+            "hidden": {"unique_id": "UNIQUE_ID"},
             "optional": {
                 "detector": (["guided", "high pass"], {"default": "guided",
                                                        "tooltip": "How texture is found. 'guided' uses an "
@@ -184,7 +186,10 @@ class HighFrequencyMask:
 
     def build(self, image, strength, grow, feather, grain_filter, invert,
               samples=None, detector="guided", radius_override=0,
-              black_override=0.0, white_override=0.0):
+              black_override=0.0, white_override=0.0, unique_id=None):
+
+        if unique_id is not None:
+            _remember(unique_id, image)
 
         src_dev = image.device
         dev = _device()
@@ -280,5 +285,137 @@ class HighFrequencyMask:
             return []
 
 
+# ---------------------------------------------------------------- auto button
+#
+# The button in the node needs something to measure, and the only place the
+# image exists is inside build(). So each run stashes a small copy, keyed by the
+# node's id, and the /hfmask/auto route works from that. Before the graph has
+# ever run there is nothing cached -- the route says so rather than guessing.
+
+_LAST_IMAGE = {}
+_CACHE_EDGE = 512
+
+
+def _remember(node_id, image):
+    """Keep a small copy of the last input, for the auto button."""
+    try:
+        x = image[:1].movedim(-1, 1).float()
+        h, w = x.shape[-2], x.shape[-1]
+        if min(h, w) > _CACHE_EDGE:
+            k = _CACHE_EDGE / min(h, w)
+            x = F.interpolate(x, size=(max(1, round(h * k)), max(1, round(w * k))),
+                              mode="area")
+        _LAST_IMAGE[str(node_id)] = x.movedim(1, -1).cpu()
+        if len(_LAST_IMAGE) > 32:                      # do not grow without bound
+            _LAST_IMAGE.pop(next(iter(_LAST_IMAGE)))
+    except Exception:
+        pass
+
+
+def _estimate_noise(img):
+    """Grain level, read off the flattest parts of the image.
+
+    A blurred copy is subtracted to leave only fine detail, then the local
+    deviation is taken over the calmest tenth of the picture -- whatever is
+    left there is grain or compression, not content.
+    """
+    g = img.movedim(-1, 1).mean(dim=1, keepdim=True).float()
+    resid = g - _blur(g, 1.0)
+    k = 8
+    h2, w2 = resid.shape[-2] // k * k, resid.shape[-1] // k * k
+    if h2 < k or w2 < k:
+        return 0.0
+    b = (resid[..., :h2, :w2]
+         .reshape(1, 1, h2 // k, k, w2 // k, k)
+         .permute(0, 1, 2, 4, 3, 5)
+         .reshape(-1, k * k))
+    sd = b.std(dim=1)
+    calm = torch.quantile(sd.float(), 0.10)
+    return float(calm) * 255.0
+
+
+def _suggest(img, grow, feather, detector):
+    """Pick grain_filter from measured noise, then solve strength for coverage.
+
+    The target is the mask profile that reads well in practice -- roughly three
+    quarters of the frame open, a solid quarter held back. Strength is bisected
+    rather than derived because the autolevel is a quantile, which has no
+    closed form.
+    """
+    node = HighFrequencyMask()
+    noise = _estimate_noise(img)
+    grain = 0.0 if noise < 0.6 else min(2.0, round(noise / 0.9, 2))
+
+    target = 0.72
+    lo, hi = 0.40, 2.00
+
+    def coverage(st):
+        return float(node.build(img, st, grow, feather, grain, False,
+                                detector=detector)["result"][0].mean())
+
+    # The slider cannot always reach the target: with a generous grow the mask is
+    # already past it at minimum strength. Say so rather than clamping silently.
+    at_lo, at_hi = coverage(lo), coverage(hi)
+    if at_lo > target:
+        strength, note = lo, ("already above target at minimum strength — "
+                              "lower grow for a tighter mask")
+    elif at_hi < target:
+        strength, note = hi, ("cannot reach target at maximum strength — "
+                              "raise grow or lower the radius")
+    else:
+        note = ""
+        for _ in range(9):
+            mid = (lo + hi) / 2.0
+            if coverage(mid) < target:
+                lo = mid
+            else:
+                hi = mid
+        strength = round((lo + hi) / 2.0, 2)
+
+    m = node.build(img, strength, grow, feather, grain, False,
+                   detector=detector)["result"][0]
+    return {
+        "strength": strength,
+        "grain_filter": grain,
+        "note": note,
+        "noise": round(noise, 2),
+        "white": round(float((m >= 0.98).float().mean()) * 100, 1),
+        "black": round(float((m <= 0.02).float().mean()) * 100, 1),
+        "mean": round(float(m.mean()), 3),
+    }
+
+
+try:
+    import server
+    from aiohttp import web
+
+    @server.PromptServer.instance.routes.post("/hfmask/auto")
+    async def _hfmask_auto(request):
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        node_id = str(data.get("node_id", ""))
+        img = _LAST_IMAGE.get(node_id)
+        if img is None:
+            return web.json_response(
+                {"ok": False,
+                 "message": "No image yet — run the graph once, then press again."})
+        try:
+            out = _suggest(img,
+                           float(data.get("grow", 0.5)),
+                           float(data.get("feather", 1.0)),
+                           str(data.get("detector", "guided")))
+            out["ok"] = True
+            return web.json_response(out)
+        except Exception as exc:
+            return web.json_response({"ok": False, "message": f"{type(exc).__name__}: {exc}"})
+except Exception:
+    pass
+
+
+WEB_DIRECTORY = "./web"
+
 NODE_CLASS_MAPPINGS = {"HighFrequencyMask": HighFrequencyMask}
 NODE_DISPLAY_NAME_MAPPINGS = {"HighFrequencyMask": "High Frequency Mask"}
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

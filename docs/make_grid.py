@@ -64,7 +64,7 @@ def main():
            (245, 245, 245), f_t)
     y += 30
     d.text((PAD, y), "White = sampled.  Black = left alone.  All other settings at "
-                     "the node's defaults (grow 1.0, feather 1.0, grain_filter 1.0).",
+                     "the node's defaults (grow 0.5, feather 1.0, grain_filter 1.0).",
            (150, 150, 156), f_s)
     y += 26
 
@@ -73,7 +73,7 @@ def main():
                  (PAD + LABEL_W, y))
     d.text((PAD + LABEL_W, y + tile_h + 7), "source image", (235, 235, 235), f_c)
 
-    m = build_mask(node, img, sensitivity=1.0, grow=1.0, feather=1.0, grain=1.0)
+    m = build_mask(node, img, sensitivity=1.0, grow=0.5, feather=1.0, grain=1.0)
     arr = (m[0].clamp(0, 1).numpy() * 255).astype(np.uint8)
     canvas.paste(Image.fromarray(arr).convert("RGB").resize((TILE_W, tile_h), Image.LANCZOS),
                  (PAD + LABEL_W + TILE_W + GAP, y))
@@ -98,7 +98,7 @@ def main():
         d.text((PAD, y + tile_h // 2 - 14), f"{px} px", (235, 235, 235), f_h)
         d.text((PAD, y + tile_h // 2 + 8), note, (150, 150, 156), f_s)
         for c, st in enumerate(STRENGTH):
-            mm = build_mask(node, img, sensitivity=st, grow=1.0, feather=1.0,
+            mm = build_mask(node, img, sensitivity=st, grow=0.5, feather=1.0,
                             grain=1.0, radius_override=px)
             a = (mm[0].clamp(0, 1).numpy() * 255).astype(np.uint8)
             x = PAD + LABEL_W + c * (TILE_W + GAP)
