@@ -23,15 +23,39 @@ function setWidget(node, name, value) {
     return true;
 }
 
+const VALID_DETECTORS = ["guided", "high pass"];
+
+// Repair graphs saved before `detector` existed.
+//
+// ComfyUI restores widget values by position, so a workflow saved when the node
+// had one widget fewer feeds every later value into the wrong widget -- which is
+// how a numeric 0 lands in a combo that only accepts strings. Anything that is
+// not a valid option gets put back to the default.
+function repairDetector(node) {
+    const w = widget(node, "detector");
+    if (!w) return;
+    if (!VALID_DETECTORS.includes(w.value)) {
+        w.value = VALID_DETECTORS[0];
+    }
+}
+
 app.registerExtension({
     name: "hfmask.autobutton",
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE) return;
 
+
+        const onConfigure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function () {
+            onConfigure?.apply(this, arguments);
+            repairDetector(this);
+        };
+
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onCreated?.apply(this, arguments);
+            repairDetector(this);
 
             const node = this;
             const status = { text: "" };
