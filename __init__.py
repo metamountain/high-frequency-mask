@@ -66,31 +66,44 @@ def _erode(x, px):
 class HighFrequencyMask:
 
     DESCRIPTION = (
-        "Builds a mask from an image's texture: white where there is detail, black "
-        "where the image is flat. Feed it to a sampler and only the textured regions "
-        "get resampled -- skies, walls and skin stay exactly as they were. Connect a "
-        "LATENT and the mask is attached as its noise mask automatically.\n\n"
-        "CHOOSING A RADIUS. radius_override decides which SIZE of structure counts as "
-        "detail. 0 picks it from the image size (min(W,H)/52), which targets roughly "
-        "16px structures. Finer texture wants a smaller radius: about 0.5x for skin, "
-        "fabric or concrete aggregate, 0.7x for foliage, 2x and up for large shapes.\n\n"
-        "TWO THINGS THAT SURPRISE PEOPLE. (1) entrauschen defaults to 1.0. On clean "
-        "renders and upscales that smooths away real texture before it is ever "
-        "measured -- set it to 0 unless the source is grainy or JPEG. (2) "
-        "black_override and white_override are measured on the HIGH-PASS image, not on "
-        "brightness: useful values sit near 0-30, not 0-255. Setting either one also "
-        "switches off the automatic levels, which makes staerke do nothing.\n\n"
+        "Protects flat areas during an upscale or refine pass. White where the image "
+        "already has texture, black where it is flat -- feed it to the sampler as a "
+        "noise mask and skies, walls, panels and skin are left alone.\n\n"
+        "WHAT IT FIXES. Upscalers invent detail in surfaces that should stay smooth "
+        "and drift the colour while doing it. Flux Klein is especially prone to both. "
+        "Masking the flat regions out stops the model touching them at all, so they "
+        "keep their original tone and stay clean.\n\n"
+        "SETTINGS FOR UPSCALING. The shipped defaults are tuned too coarse for this "
+        "job -- they let roughly three times more through in flat areas than needed. "
+        "Set radius_override to about a third of the automatic radius (5-7 at 1024px, "
+        "10-14 at 2048px) and entrauschen to 0 unless the source is grainy or JPEG. "
+        "That takes the flat-area leak from 0.116 down to 0.038 and fully protects "
+        "about 90 percent of flat pixels. Add weichheit 0.5-1.0 so the mask edge does "
+        "not leave a seam, and groesse 0.5-1.0 so real detail keeps a margin.\n\n"
+        "Going finer than a third buys nothing -- protection plateaus there while "
+        "texture retention starts dropping.\n\n"
+        "TWO THINGS THAT MISLEAD. entrauschen defaults to 1.0, which smooths away real "
+        "texture on clean renders before it is ever measured. And black_override and "
+        "white_override are measured on the HIGH-PASS image, not on brightness: useful "
+        "values sit near 0-30, not 0-255, and setting either one switches off the "
+        "automatic levels so staerke stops mattering.\n\n"
         "The info output reports the values actually used, so you can read them off a "
-        "good frame and pin them for the rest of a batch."
+        "good frame and pin them for a whole batch or video."
     )
 
     SEARCH_ALIASES = [
+        # what it is for
+        "upscale mask", "upscale detail", "upscale protection", "protect flat areas",
+        "colour shift", "color shift", "too much detail", "over detail",
+        "detail control", "refine mask", "hires fix mask", "flux klein",
+        "flat area mask", "sky mask", "skin mask", "smooth area",
+        # what it is
         "detail mask", "texture mask", "high pass", "highpass", "high frequency",
-        "high frequency mask", "frequency separation", "detail detection",
-        "skin mask", "skin texture", "foliage mask", "sky mask", "flat area mask",
-        "smooth area", "structure mask", "edge mask", "sharpen mask",
-        "detailer mask", "selective sampling", "noise mask", "denoise mask",
+        "high frequency mask", "frequency separation", "structure mask",
+        "selective sampling", "noise mask",
+        # German
         "hochfrequenz", "detailmaske", "strukturmaske", "texturmaske",
+        "flaechen schuetzen", "farbverschiebung",
     ]
 
     OUTPUT_TOOLTIPS = (

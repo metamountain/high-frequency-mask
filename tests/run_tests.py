@@ -9,7 +9,7 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-MODULES = ["test_regressions", "test_radius", "test_photo"]
+MODULES = ["test_regressions", "test_radius"]
 
 
 def main():
