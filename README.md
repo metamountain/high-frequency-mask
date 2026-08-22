@@ -23,15 +23,16 @@ into the sampler. Then **change the defaults** — they ship tuned too coarse fo
 | `weichheit` | 1.00 | **0.5–1.0** | soft edge, so the mask leaves no seam |
 | `groesse` | 1.00 | **0.5–1.0** | real detail keeps a safety margin |
 
-Measured effect on the test render — flat-area leak is what an upscaler gets to
-hallucinate into:
+Measured on two ComfyUI generations — flat-area leak is what an upscaler gets to
+hallucinate into and shift the colour of:
 
-| | flat leak | texture kept | flat pixels fully protected |
+| fixture | defaults | tuned | texture kept |
 |---|---|---|---|
-| defaults | 0.116 | 0.297 | 81.5% |
-| **tuned as above** | **0.038** | **0.417** | **90.4%** |
+| concrete facade | .115 | **.048** | .298 → .405 |
+| flat sky + snow field | .064 | **.011** | .305 → .404 |
 
-Three times less leak *and* more real texture retained.
+Two to six times less leak *and* more real texture retained — not a trade-off. The
+more flat area an image has, the more the coarse default costs you.
 
 ## Inputs
 

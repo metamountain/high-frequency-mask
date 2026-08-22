@@ -10,7 +10,16 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-PHOTO = os.path.join(HERE, "assets", "spraycrete.png")
+ASSETS = os.path.join(HERE, "assets")
+
+# ComfyUI generations -- the kind of image this node actually runs on, not
+# photographs. Both have large genuinely flat regions (sky, snow, smooth
+# concrete panels) next to genuine texture, which is the situation an upscaler
+# gets wrong: it invents detail in the flat parts and shifts their colour.
+IMAGES = {
+    "spraycrete": "sprayed concrete facade -- rough aggregate vs smooth panels and overcast sky",
+    "degenerator": "rock-and-concrete tower -- cliff texture vs flat sky, snow field and panels",
+}
 
 # The node imports folder_paths, which only resolves from the ComfyUI root.
 _comfy = os.path.abspath(os.path.join(ROOT, "..", ".."))
@@ -25,15 +34,9 @@ def load_node():
     return mod, mod.HighFrequencyMask()
 
 
-def photo(min_edge=1024):
-    """The test render as a ComfyUI IMAGE tensor (1, H, W, 3).
-
-    Sprayed concrete: rough aggregate is real texture, the panels and the
-    overcast sky are genuinely flat. Exactly the situation this node exists
-    for -- an upscaler will happily invent detail and shift colour in those
-    flat panels if nothing stops it.
-    """
-    im = Image.open(PHOTO).convert("RGB")
+def photo(min_edge=1024, name="spraycrete"):
+    """One of the ComfyUI test generations as an IMAGE tensor (1, H, W, 3)."""
+    im = Image.open(os.path.join(ASSETS, name + ".jpg")).convert("RGB")
     if min(im.size) != min_edge:
         s = min_edge / min(im.size)
         im = im.resize((round(im.size[0] * s), round(im.size[1] * s)), Image.LANCZOS)
@@ -66,7 +69,7 @@ def build_mask(node, img, sensitivity=1.0, grow=0.0, feather=0.0,
     return node.build(img, sensitivity, grow, feather, grain, invert, **kw)["result"][0]
 
 
-def protection(node, img=None, block=8, **kw):
+def protection(node, img=None, block=8, name="spraycrete", **kw):
     """The number that matters for upscaling.
 
     Returns (flat_leak, texture_level, fully_protected_fraction):
@@ -74,7 +77,7 @@ def protection(node, img=None, block=8, **kw):
     real texture, and what share of flat pixels are fully black.
     """
     if img is None:
-        img = photo()
+        img = photo(name=name)
     flat, textured, (h, w) = variance_quartiles(img, block)
     m = build_mask(node, img, **kw)[0][:h, :w]
     return (float(m[flat].mean()),

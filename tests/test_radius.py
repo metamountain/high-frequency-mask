@@ -15,28 +15,35 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import torch
 import torch.nn.functional as F
 
-from helpers import load_node, photo, protection, radius_px, build_mask
+from helpers import load_node, photo, protection, radius_px, build_mask, IMAGES
 
 XFAIL = set()
 MULTS = [0.15, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0]
 
 
 def test_smaller_radius_protects_flat_areas_better():
-    """Monotone: the finer the high-pass, the less leaks into flat regions."""
+    """Monotone on every fixture: finer high-pass, less leak into flat regions."""
     _, node = load_node()
-    leaks = [protection(node, grain=0.0, radius_override=radius_px(m))[0]
-             for m in MULTS]
-    for a, b, ma, mb in zip(leaks, leaks[1:], MULTS, MULTS[1:]):
-        assert a <= b + 1e-3, f"{ma}x leaked {a:.3f} but {mb}x leaked {b:.3f}"
+    for name in IMAGES:
+        leaks = [protection(node, name=name, grain=0.0, radius_override=radius_px(m))[0]
+                 for m in MULTS]
+        for a, b, ma, mb in zip(leaks, leaks[1:], MULTS, MULTS[1:]):
+            assert a <= b + 1e-3, f"{name}: {ma}x leaked {a:.3f}, {mb}x leaked {b:.3f}"
 
 
-def test_defaults_leak_three_times_more_than_necessary():
-    """The shipped defaults are tuned too coarse for upscale protection."""
+def test_defaults_leak_several_times_more_than_necessary():
+    """The shipped defaults are tuned too coarse for upscale protection.
+
+    Measured: 3x worse on the concrete facade, 10x worse on the image with a
+    large flat sky and snow field -- the more flat area, the more it costs.
+    """
     _, node = load_node()
-    default_leak = protection(node)[0]
-    tuned_leak = protection(node, grain=0.0, radius_override=radius_px(0.35))[0]
-    assert default_leak > tuned_leak * 2.5, (
-        f"default {default_leak:.3f} vs tuned {tuned_leak:.3f}")
+    for name in IMAGES:
+        default_leak = protection(node, name=name)[0]
+        tuned_leak = protection(node, name=name, grain=0.0,
+                                radius_override=radius_px(0.35))[0]
+        assert default_leak > tuned_leak * 2.5, (
+            f"{name}: default {default_leak:.3f} vs tuned {tuned_leak:.3f}")
 
 
 def test_protection_plateaus_below_a_third():
