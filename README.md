@@ -11,6 +11,26 @@ stay clean.
 
 Everything runs in torch on the GPU and handles batches.
 
+## Wiring
+
+Send `mask` into **Set Latent Noise Mask**, along with the latent you are about
+to resample, and that into your sampler:
+
+```
+Image ──► High Frequency Mask ──mask──► Set Latent Noise Mask ──► KSampler
+                                            ▲
+Latent ─────────────────────────────────────┘
+```
+
+That is the intended use and what these defaults were tuned against. The node
+can attach the mask itself if you connect a latent to its `samples` input, but
+Set Latent Noise Mask reads more clearly in a graph.
+
+There is a **calculate auto** button on the node: it measures the image this
+node last processed and sets `strength` and `grain_filter` from it. The graph
+has to have run once first — before that there is nothing to measure and the
+button says so rather than guessing.
+
 ## Quick start for upscaling
 
 Connect `image` from your source, `samples` from your latent, and the `latent` output

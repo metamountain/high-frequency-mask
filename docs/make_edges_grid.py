@@ -60,12 +60,12 @@ def main():
     canvas.paste(Image.fromarray(src).resize((TILE_W, th), Image.LANCZOS), (PAD + LABEL_W, y))
     d.text((PAD + LABEL_W, y + th + 7), "source image", (235, 235, 235), _f(15))
 
-    m = build_mask(node, img, grow=1.0, feather=1.0, grain=1.0)
+    m = build_mask(node, img, grow=0.5, feather=1.0, grain=1.0)
     a = (m[0].clamp(0, 1).numpy() * 255).astype(np.uint8)
     x = PAD + LABEL_W + TILE_W + GAP
     canvas.paste(Image.fromarray(a).convert("RGB").resize((TILE_W, th), Image.LANCZOS), (x, y))
     wt, bk, mx, mn = stats(m[0])
-    d.text((x, y + th + 7), "node defaults (grow 1.0, feather 1.0)", (120, 230, 140), _f(15))
+    d.text((x, y + th + 7), "node defaults (grow 0.5, feather 1.0)", (120, 230, 140), _f(15))
     d.text((x, y + th + 27), f"white {wt:.0f}%   black {bk:.0f}%   max {mx:.2f}",
            (150, 150, 156), _f(13))
 
