@@ -38,6 +38,22 @@ Also: they are a hidden mode switch. If *either* is > 0 the entire quantile auto
 is bypassed and `staerke` becomes a no-op (verified: identical output at 0.4/1.0/2.0).
 Black-only input silently falls back to `white = 255` and yields a near-empty mask.
 
+## `entrauschen` defaults to 1.0, which is wrong for clean sources
+
+Measured on `tests/assets/spraycrete.png` (a render, so no sensor grain), block
+variance quartiles at 1024px:
+
+| setting | textured | flat | separation |
+|---|---|---|---|
+| default (`entrauschen=1.0`) | .297 | .116 | **.181** |
+| `entrauschen=0` | .378 | .073 | **.305** |
+| `entrauschen=0`, radius 0.5x | .411 | .044 | **.367** |
+
+The default costs 40% of the separation *and* leaks more into flat regions, because
+the pre-blur removes real texture before anything is measured. The setting earns its
+keep on grainy photographs and JPEG sources; on renders and clean upscales it should
+default to 0. Enforced by `tests/test_photo.py`.
+
 ## Known breakage (all reproduced — see `tests/test_regressions.py`)
 
 - **`torch.quantile` caps at 2^24 = 16,777,216 elements** (`:130`). Any image at or

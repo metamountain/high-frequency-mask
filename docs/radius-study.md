@@ -69,6 +69,22 @@ Corroborated on three real photographs (3024x4032, 2880x2880, 5256x3504):
 `max(4, ...)` floor and pixel quantisation take over rather than the constant. Any
 resolution test must stay above 256px or it measures the floor, not the law.
 
+## Corroboration on a real render
+
+`tests/assets/spraycrete.png` -- sprayed concrete, where rough aggregate is genuine
+texture and the panels and overcast sky are genuinely flat. No known ground truth, so
+detail is proxied by local variance quartiles.
+
+| setting | textured | flat | separation |
+|---|---|---|---|
+| defaults | .297 | .116 | .181 |
+| `grain_suppress=0` | .378 | .073 | .305 |
+| `grain_suppress=0`, radius 0.5x | .411 | .044 | **.367** |
+
+Both chart findings reproduce on real data: a sub-1.0 radius beats the default on fine
+texture, and coupling grain suppression into the pipeline is expensive -- here it costs
+40% of the separation and *increases* the flat-region leak.
+
 ## How this compares to other tools
 
 | tool | control | default | scales with resolution? |
