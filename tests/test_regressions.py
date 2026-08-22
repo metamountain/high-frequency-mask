@@ -11,18 +11,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import torch
 
-from helpers import load_node, photo, protection, build_mask
+from helpers import load_node, photo, protection, build_mask, IMAGES
 
 XFAIL = {"quantile_ceiling", "reflect_pad_overflow", "latent_batch_mismatch"}
 
 
 def test_happy_path():
-    """Flat panels and sky stay dark; the concrete aggregate opens up."""
+    """Flat sky, snow and panels stay dark; real texture opens up."""
     _, node = load_node()
-    leak, texture, _ = protection(node)
-    assert leak < 0.15, f"flat areas should stay protected, got {leak:.3f}"
-    assert texture > 0.25, f"real texture should open up, got {texture:.3f}"
-    assert texture - leak > 0.15, f"separation too weak: {texture - leak:.3f}"
+    for name in IMAGES:
+        leak, texture, _ = protection(node, name=name)
+        assert leak < 0.15, f"{name}: flat areas should stay protected, got {leak:.3f}"
+        assert texture > 0.25, f"{name}: texture should open up, got {texture:.3f}"
+        assert texture - leak > 0.15, f"{name}: separation {texture - leak:.3f}"
 
 
 def test_invert_swaps_the_regions():
