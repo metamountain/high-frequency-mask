@@ -10,6 +10,7 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CHART = os.path.join(HERE, "assets", "testchart.png")
+PHOTO = os.path.join(HERE, "assets", "spraycrete.png")
 
 # The node imports folder_paths, which only resolves from the ComfyUI root.
 _comfy = os.path.abspath(os.path.join(ROOT, "..", ".."))
@@ -31,6 +32,37 @@ def chart(min_edge=1024):
         s = min_edge / min(im.size)
         im = im.resize((round(im.size[0] * s), round(im.size[1] * s)), Image.LANCZOS)
     return torch.from_numpy(np.asarray(im).astype(np.float32) / 255.0).unsqueeze(0)
+
+
+def photo(min_edge=1024):
+    """A real render: sprayed-concrete aggregate against flat panels and flat sky."""
+    im = Image.open(PHOTO).convert("RGB")
+    if min(im.size) != min_edge:
+        s = min_edge / min(im.size)
+        im = im.resize((round(im.size[0] * s), round(im.size[1] * s)), Image.LANCZOS)
+    return torch.from_numpy(np.asarray(im).astype(np.float32) / 255.0).unsqueeze(0)
+
+
+def variance_quartiles(img, block=8):
+    """Detail proxy for images without known ground truth: local std per block.
+
+    Returns (flat_mask, textured_mask, (H, W)) covering the bottom and top
+    quartile of block standard deviation.
+    """
+    import torch.nn.functional as F
+    g = img.mean(-1)[0]
+    h, w = g.shape
+    h2, w2 = h // block * block, w // block * block
+    b = (g[:h2, :w2]
+         .reshape(h2 // block, block, w2 // block, block)
+         .permute(0, 2, 1, 3)
+         .reshape(h2 // block, w2 // block, -1))
+    sd = b.std(-1)
+    q1 = torch.quantile(sd.flatten(), 0.25)
+    q3 = torch.quantile(sd.flatten(), 0.75)
+    up = lambda t: F.interpolate(t.float()[None, None], size=(h2, w2),
+                                 mode="nearest")[0, 0].bool()
+    return up(sd <= q1), up(sd >= q3), (h2, w2)
 
 
 def patches(min_edge=1024):

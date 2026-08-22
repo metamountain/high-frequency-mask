@@ -8,3 +8,6 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+
+# local-only source render; the repo ships the downscaled tests/assets/spraycrete.png
+spraycrete_00049_.png
