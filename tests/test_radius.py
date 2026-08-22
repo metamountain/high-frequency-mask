@@ -1,89 +1,89 @@
-"""Radius characterisation. Regenerates the numbers in docs/radius-study.md.
+"""What the settings do, measured on the real render.
 
-Slow-ish (a few seconds). Run directly for the full tables:
-    python tests/test_radius.py
+The job is protecting flat areas during an upscale pass. So the number that
+matters is not "does the mask find texture" but "how much does it let through
+where there is nothing to refine" -- every bit of leak there is an upscaler
+free to invent detail and shift colour.
+
+Run directly for the tables:  python tests/test_radius.py
 """
-import numpy as np
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import torch
 import torch.nn.functional as F
 
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from helpers import load_node, photo, protection, radius_px, build_mask
 
-from helpers import load_node, chart, patches, patch_mean, background_mean, build_mask
-
-MULTS = [0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0]
+XFAIL = set()
+MULTS = [0.15, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0]
 
 
-def _mask(node, img, mult, grain):
-    h, w = img.shape[1], img.shape[2]
-    base = max(4, round(min(w, h) / 52.0))
-    ro = max(1, int(round(base * mult))) if mult != 1.0 else 0
-    return build_mask(node, img, grain=grain, radius_override=ro)
-
-
-def sweep(grain=0.0, min_edge=1024):
-    """separation per (texture scale, radius multiplier)."""
+def test_smaller_radius_protects_flat_areas_better():
+    """Monotone: the finer the high-pass, the less leaks into flat regions."""
     _, node = load_node()
-    img, boxes = chart(min_edge), patches(min_edge)
-    rows = {}
-    for mu in MULTS:
-        m = _mask(node, img, mu, grain)
-        bg = background_mean(m, boxes)
-        for b in boxes:
-            rows.setdefault(b["scale"], {})[mu] = patch_mean(m, b) - bg
-    return rows
+    leaks = [protection(node, grain=0.0, radius_override=radius_px(m))[0]
+             for m in MULTS]
+    for a, b, ma, mb in zip(leaks, leaks[1:], MULTS, MULTS[1:]):
+        assert a <= b + 1e-3, f"{ma}x leaked {a:.3f} but {mb}x leaked {b:.3f}"
 
 
-def test_radius_optimum_tracks_texture_scale():
-    """Finer texture must peak at a smaller radius. This is why it needs a slider."""
-    rows = sweep(grain=0.0)
-    peaks = {s: max(v, key=v.get) for s, v in rows.items()}
-    fine = peaks[min(peaks)]
-    coarse = peaks[max(peaks)]
-    assert fine < coarse, f"expected monotone peak shift, got {peaks}"
+def test_defaults_leak_three_times_more_than_necessary():
+    """The shipped defaults are tuned too coarse for upscale protection."""
+    _, node = load_node()
+    default_leak = protection(node)[0]
+    tuned_leak = protection(node, grain=0.0, radius_override=radius_px(0.35))[0]
+    assert default_leak > tuned_leak * 2.5, (
+        f"default {default_leak:.3f} vs tuned {tuned_leak:.3f}")
 
 
-def test_whole_slider_range_is_live_without_grain_coupling():
-    """With grain decoupled, no multiplier in 0.25-4.0 is uniformly useless."""
-    rows = sweep(grain=0.0)
-    for mu in MULTS:
-        best = max(rows[s][mu] for s in rows)
-        assert best > 0.15, f"multiplier {mu} is dead everywhere (best {best:.3f})"
+def test_protection_plateaus_below_a_third():
+    """Going finer than ~0.25x buys nothing, so that is the useful floor."""
+    _, node = load_node()
+    at_015 = protection(node, grain=0.0, radius_override=radius_px(0.15))
+    at_035 = protection(node, grain=0.0, radius_override=radius_px(0.35))
+    assert abs(at_015[2] - at_035[2]) < 0.02, "protection should be flat here"
+    assert at_035[1] >= at_015[1], "but the coarser end should keep more texture"
 
 
-def test_grain_coupling_costs_the_top_of_the_range():
-    """base drives grain suppression too, which over-smooths at high radius."""
-    off, on = sweep(grain=0.0), sweep(grain=1.0)
-    fine = min(off)
-    assert off[fine][4.0] > on[fine][4.0], "expected coupling to hurt at 4.0"
+def test_grain_suppression_hurts_a_clean_render():
+    """entrauschen defaults to 1.0 and costs protection on noise-free sources."""
+    _, node = load_node()
+    on = protection(node, radius_override=radius_px(1.0))
+    off = protection(node, grain=0.0, radius_override=radius_px(1.0))
+    assert off[0] < on[0], f"grain=0 should leak less: {off[0]:.3f} vs {on[0]:.3f}"
+    assert off[1] > on[1], "and keep more real texture"
+
+
+def test_feather_costs_protection_but_stays_usable():
+    """Soft edges avoid upscale seams; the price is a little extra leak."""
+    _, node = load_node()
+    hard = protection(node, grain=0.0, feather=0.0, radius_override=radius_px(0.35))
+    soft = protection(node, grain=0.0, feather=1.0, radius_override=radius_px(0.35))
+    assert soft[0] > hard[0], "feathering must let a little more through"
+    assert soft[0] < 0.08, f"but not this much: {soft[0]:.3f}"
 
 
 def test_auto_radius_is_resolution_stable():
-    """base = min(W,H)/52 should give the same mask at 768 and 1536."""
+    """base = min(W,H)/52 gives a consistent mask across upscale steps."""
     _, node = load_node()
     out = {}
     for edge in (768, 1024, 1536):
-        m = build_mask(node, chart(edge), grain=0.0)
+        m = build_mask(node, photo(edge), grain=0.0)
         out[edge] = F.interpolate(m[None], size=(256, 256), mode="area")[0, 0]
     for edge in (768, 1536):
         inter = float(torch.min(out[edge], out[1024]).sum())
         union = float(torch.max(out[edge], out[1024]).sum())
-        iou = inter / max(union, 1e-6)
-        assert iou > 0.80, f"{edge}px drifts from 1024px reference: IoU {iou:.3f}"
+        assert inter / max(union, 1e-6) > 0.80, f"{edge}px drifts from 1024px"
 
 
 if __name__ == "__main__":
-    for grain, label in ((0.0, "grain_suppress = 0 (radius isolated)"),
-                         (1.0, "grain_suppress = 1 (as shipped)")):
-        rows = sweep(grain=grain)
-        print("=" * 78)
-        print(label)
-        print("=" * 78)
-        print(f"  {'texture':9s}" + "".join(f"{m:>7}" for m in MULTS) + "   peak")
-        for s in sorted(rows):
-            v = rows[s]
-            print(f"  {str(s) + 'px':9s}" + "".join(f"{v[m]:7.3f}" for m in MULTS)
-                  + f"   {max(v, key=v.get)}")
-        print()
+    _, node = load_node()
+    for grain in (1.0, 0.0):
+        print(f"\ngrain_suppress = {grain}")
+        print(f"  {'radius':>7} {'px':>4} | {'flat leak':>10} {'texture':>8} {'protected':>10}")
+        for m in MULTS:
+            leak, tex, prot = protection(node, grain=grain, radius_override=radius_px(m))
+            print(f"  {m:>7} {radius_px(m):>4} | {leak:>10.3f} {tex:>8.3f} {prot*100:>9.1f}%")

@@ -1,84 +1,95 @@
 # High Frequency Mask — working notes
 
-ComfyUI custom node. Builds a mask that is white where an image has texture and
-black where it is flat, so a sampler only touches the detailed regions.
-Single file: `__init__.py`. All torch, GPU, batch-aware.
+## What this is actually for
 
-## Pipeline
+**Protecting flat areas during ComfyUI upscale and refine passes.** Upscalers invent
+detail in surfaces that should stay smooth and shift their colour while doing it;
+**Flux Klein is especially prone to both**. The node masks those regions out so the
+sampler never touches them.
 
-```
-grayscale -> pre-blur (grain_suppress) -> highpass (g - blur(g)) -> clamp>=0, x3
-          -> per-image quantile autolevel -> grow/shrink -> feather -> invert
-```
+This framing matters for every decision here. The metric is not "does the mask find
+texture" — it is **how much leaks through in flat regions**, because every bit of leak
+is an upscaler free to hallucinate. Optimise for protection, not for coverage.
 
-## The one thing to know: `base` drives four things at once
+## The defaults are wrong for this job
+
+Measured on `tests/assets/spraycrete.png` at 1024px:
+
+| | flat leak | texture kept | flat fully protected |
+|---|---|---|---|
+| shipped defaults | .116 | .297 | 81.5% |
+| radius 0.35×, `entrauschen` 0 | **.038** | **.417** | **90.4%** |
+
+Two independent causes, both worth fixing in code rather than documentation:
+
+- **The auto radius is ~3× too coarse.** Leak falls monotonically with radius and
+  plateaus below 0.3×; texture retention peaks at 0.25–0.35×. So `min(W,H)/52` should
+  be closer to `min(W,H)/150`. In px: 5–7 at 1024, 10–14 at 2048.
+- **`entrauschen` defaults to 1.0**, which pre-smooths the image before anything is
+  measured. On clean renders that costs 60% more leak *and* removes real texture. It
+  should default to 0 and only be raised for grainy or JPEG sources.
+
+Full tables: `docs/upscale-settings.md`.
+
+## `base` drives four things at once
 
 `base = radius_override or max(4, round(min(W, H) / 52))` (`__init__.py:109`).
-Changing it moves **all** of these together — they are not independently tunable:
+These are not independently tunable:
 
 | consumer | value | line |
 |---|---|---|
-| grain pre-blur sigma | `base / 12 * grain_suppress` | `:113` |
-| highpass sigma       | `base / 2`                  | `:116` |
-| grow/shrink px       | `base * 1.5 * abs(grow)`    | `:135` |
-| feather sigma        | `base * 0.5 * feather`      | `:139` |
+| grain pre-blur sigma | `base / 12 * entrauschen` | `:113` |
+| high-pass sigma | `base / 2` | `:116` |
+| grow/shrink px | `base * 1.5 * abs(groesse)` | `:135` |
+| feather sigma | `base * 0.5 * weichheit` | `:139` |
 
-This coupling is measurable, not theoretical: raising the radius also raises grain
-suppression, which over-smooths the image before analysis and makes high radius
-values look worse than they are. See `docs/radius-study.md` — decoupling grain from
-`base` recovers roughly half the lost discrimination at the top of the range.
+This coupling is why turning the radius down also turns grain suppression down — the
+two "fixes" above are partly the same fix. Decoupling `entrauschen` from `base` is the
+single highest-value change to the maths.
 
 ## Units trap: levels are high-pass contrast, not brightness
 
-`black_override` / `white_override` are 0–255 **of the high-pass image**, not of the
-source. Auto-derived values land near `black 0 / white 8..26`, i.e. in the bottom 10%
-of the nominal range. Any UI that exposes these must say so or they are unusable.
+`black_override` / `white_override` are 0–255 **of the high-pass image**. Auto values
+land near `black 5..10 / white 12..76`, i.e. in the bottom 10–30% of the nominal range.
 
-Also: they are a hidden mode switch. If *either* is > 0 the entire quantile autolevel
-is bypassed and `staerke` becomes a no-op (verified: identical output at 0.4/1.0/2.0).
-Black-only input silently falls back to `white = 255` and yields a near-empty mask.
+They are also a hidden mode switch: if *either* is > 0 the quantile autolevel is
+bypassed entirely and `staerke` becomes a no-op. Black-only input silently falls back
+to `white = 255` and yields a near-empty mask.
 
-## `entrauschen` defaults to 1.0, which is wrong for clean sources
+## Known breakage (reproduced in `tests/test_regressions.py`)
 
-Measured on `tests/assets/spraycrete.png` (a render, so no sensor grain), block
-variance quartiles at 1024px:
-
-| setting | textured | flat | separation |
-|---|---|---|---|
-| default (`entrauschen=1.0`) | .297 | .116 | **.181** |
-| `entrauschen=0` | .378 | .073 | **.305** |
-| `entrauschen=0`, radius 0.5x | .411 | .044 | **.367** |
-
-The default costs 40% of the separation *and* leaks more into flat regions, because
-the pre-blur removes real texture before anything is measured. The setting earns its
-keep on grainy photographs and JPEG sources; on renders and clean upscales it should
-default to 0. Enforced by `tests/test_photo.py`.
-
-## Known breakage (all reproduced — see `tests/test_regressions.py`)
-
-- **`torch.quantile` caps at 2^24 = 16,777,216 elements** (`:130`). Any image at or
-  above ~4096x4096 raises `RuntimeError: quantile() input tensor is too large`.
-  Two files in this install's `input/` already exceed it (6720x4480, 4096x5120).
-- **Reflect-pad overflow** (`:141`). `_blur` needs `1.5 * base * feather < min(W, H)`.
-  Reachable via `radius_override=120, weichheit=4` at 512px. Switching the radius
-  control to a relative multiplier mostly defuses this, but the `max(4, ...)` floor
-  keeps it alive on very small inputs — still clamp `r` to `min(W, H) - 1`.
+- **`torch.quantile` caps at 2^24 = 16,777,216 elements** (`:130`). Images at or above
+  ~4096×4096 raise `RuntimeError: quantile() input tensor is too large`. **Reachable
+  on a normal upscale** — two files in this install's `input/` already exceed it.
+- **Reflect-pad overflow** (`:141`). `_blur` needs `1.5 * base * weichheit < min(W,H)`.
+  Clamp `r` to `min(W,H) - 1`.
 - **Latent batch mismatch falls through** (`:167`). The guard only handles
   `mm.shape[0] == 1`; for `1 < mask_batch < latent_batch` the `mm[:sh[0]]` slice is a
   no-op and a wrong-sized `noise_mask` reaches the sampler.
-- **`staerke` is dead above ~1.4.** `pw` and `pb` converge as it rises (62/60 at 2.0).
-  On a real, zero-inflated high-pass histogram both land on 0, so the
-  `max(blk + 0.03, ...)` floor sets the white point instead of the quantile. Measured
-  sky/detail separation is identical at 1.4, 1.8 and 2.0.
+
+## Corrected: `staerke` is not dead above 1.4
+
+An earlier reading — that the slider stops working above ~1.4 — came from a synthetic
+test chart whose high-pass histogram was far more zero-inflated than real images. On
+real input the slider works across its whole range (coverage .078 → .308 from 0.4 to
+2.0). It *is* badly compressed: 0.4 → 1.0 moves texture by .168, 1.4 → 2.0 by .018.
+A usability problem worth remapping, not a bug. Enforced by
+`test_sensitivity_is_compressed_at_the_top`.
+
+**Lesson:** synthetic fixtures misled on the one question that mattered. The suite now
+uses only the real render.
 
 ## Conventions that are correct as written
 
-- `_erode = -_dilate(-x)` — `max_pool2d` pads with `-inf`, which negates to `+inf`,
-  so erosion correctly does not eat inward from the frame.
-- `samples.copy()` — shallow copy is the ComfyUI idiom, the caller's dict is not mutated.
-- Per-image quantiles are deliberate, but they are also the reason masks flicker
-  across video frames. That flicker — not manual level control — is the real reason
-  the override inputs exist.
+- `_erode = -_dilate(-x)` — `max_pool2d` pads with `-inf`, negating to `+inf`, so
+  erosion correctly does not eat inward from the frame.
+- `samples.copy()` — shallow copy is the ComfyUI idiom; the caller's dict is not mutated.
+- **Scaling the radius with resolution is right here**, even though WAS, KJNodes and
+  Masquerade all use a fixed ~10px. A mask that must select the same regions at every
+  step of an upscale chain cannot use an absolute radius. Verified stable to IoU
+  0.87–0.98 from 768px to 2048px.
+- Per-image quantiles are deliberate, but they make masks flicker across video frames.
+  That flicker — not manual level control — is the real reason the overrides exist.
 
 ## Environment
 
@@ -87,4 +98,4 @@ ComfyUI 0.33.1, frontend 1.48.7, torch 2.12.1+cu130. `pytest` is **not** install
 `tests/run_tests.py` runs standalone.
 
 `custom_nodes/` is gitignored by ComfyUI (`.gitignore:8`), so this directory is
-free-standing and safe to make its own repo.
+free-standing and safe as its own repo.
