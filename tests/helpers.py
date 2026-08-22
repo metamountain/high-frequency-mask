@@ -64,6 +64,26 @@ def variance_quartiles(img, block=8):
     return up(sd <= q1), up(sd >= q3), (h2, w2)
 
 
+def halo_zone(img, flat, hw, block=8, reach=24):
+    """Split the flat regions into halo and clean.
+
+    A Gaussian high-pass responds on BOTH sides of a strong edge, so smooth
+    ground next to one gets marked as detail -- sky beside a cliff, glass
+    inside a window frame. Those flat blocks within `reach` px of a strong
+    gradient are where a detector's halo shows up, and they are the hardest
+    part of the image to protect.
+    """
+    g = img.mean(-1)[0][None, None]
+    gx = F.pad(g[..., :, 1:] - g[..., :, :-1], (0, 1, 0, 0))
+    gy = F.pad(g[..., 1:, :] - g[..., :-1, :], (0, 0, 0, 1))
+    mag = (gx * gx + gy * gy).sqrt()
+    strong = (mag > torch.quantile(mag.flatten().float(), 0.90)).float()
+    k = 2 * reach + 1
+    near = F.avg_pool2d(F.pad(strong, (reach,) * 4, mode="reflect"), k, stride=1)
+    near = (near > 0.02)[0, 0][:hw[0], :hw[1]]
+    return flat & near, flat & (~near)
+
+
 def build_mask(node, img, sensitivity=1.0, grow=0.0, feather=0.0,
                grain=1.0, invert=False, **kw):
     return node.build(img, sensitivity, grow, feather, grain, invert, **kw)["result"][0]

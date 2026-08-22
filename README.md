@@ -34,6 +34,27 @@ hallucinate into and shift the colour of:
 Two to six times less leak *and* more real texture retained — not a trade-off. The
 more flat area an image has, the more the coarse default costs you.
 
+## The grids
+
+Every grid is generated from the node itself, so the numbers under each tile are
+what you will actually get. Regenerate them with the scripts in `docs/`.
+
+**Detector** — guided filter vs the original high pass, with a zoom on the
+windows. `docs/make_detector_grid.py`
+
+![detector](docs/detector-grid.jpg)
+
+**Radius and strength** — which size of structure counts as detail, and how much
+of it. `docs/make_grid.py`
+
+![settings](docs/settings-grid.jpg)
+
+**Grow and feather** — how the mask's shape and edges behave. Note the top row:
+without `grow`, `feather` crushes the mask so it never reaches white at all.
+`docs/make_edges_grid.py`
+
+![edges](docs/edges-grid.jpg)
+
 ## How it finds texture
 
 `detector` chooses between two ways of measuring detail:
