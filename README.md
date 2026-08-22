@@ -19,9 +19,9 @@ into the sampler. Then **change the defaults** — they ship tuned too coarse fo
 | setting | default | use this | why |
 |---|---|---|---|
 | `radius_override` | 0 (auto ≈ 20 @1024) | **5–7 @1024, 10–14 @2048** | auto is ~3× too coarse; this is where protection peaks |
-| `entrauschen` | 1.00 | **0.00** | on clean renders it smooths away real texture before measuring |
-| `weichheit` | 1.00 | **0.5–1.0** | soft edge, so the mask leaves no seam |
-| `groesse` | 1.00 | **0.5–1.0** | real detail keeps a safety margin |
+| `grain_filter` | 1.00 | **0.00** | on clean renders it smooths away real texture before measuring |
+| `feather` | 1.00 | **0.5–1.0** | soft edge, so the mask leaves no seam |
+| `grow` | 1.00 | **0.5–1.0** | real detail keeps a safety margin |
 
 Measured on two ComfyUI generations — flat-area leak is what an upscaler gets to
 hallucinate into and shift the colour of:
@@ -42,10 +42,10 @@ more flat area an image has, the more the coarse default costs you.
 
 | input | what it does |
 |---|---|
-| `staerke` | how much counts as detail. Nearly all the useful travel is below 1.2 |
-| `groesse` | expand the white areas; negative shrinks |
-| `weichheit` | edge softness between white and black |
-| `entrauschen` | pre-smoothing against grain and JPEG. **Set 0 for clean sources** |
+| `strength` | how much counts as detail. Nearly all the useful travel is below 1.2 |
+| `grow` | expand the white areas; negative shrinks |
+| `feather` | edge softness between white and black |
+| `grain_filter` | pre-smoothing against grain and JPEG. **Set 0 for clean sources** |
 | `invert` | swap: protect the detail, sample the flat areas |
 | `samples` *(optional)* | if connected, the mask is attached as the latent's noise mask |
 | `radius_override` | high-pass radius in px. `0` = automatic from image size |
@@ -69,10 +69,10 @@ Each pinned by a test — see [CLAUDE.md](CLAUDE.md).
 
 - Images at or above ~4096×4096 raise `quantile() input tensor is too large`.
   **This is reachable on a normal upscale.**
-- Large `radius_override` with high `weichheit` overflows the blur's padding
+- Large `radius_override` with high `feather` overflows the blur's padding
 - `noise_mask` can reach the sampler with the wrong batch size
 - `black_override` / `white_override` are **high-pass contrast**, not brightness —
-  useful values are near 0–30 — and setting either silently disables `staerke`
+  useful values are near 0–30 — and setting either silently disables `strength`
 
 ## Tests
 
