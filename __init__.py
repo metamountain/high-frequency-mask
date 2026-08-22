@@ -160,6 +160,18 @@ class HighFrequencyMask:
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
             "optional": {
+                "samples": ("LATENT", {"tooltip": "Optional. If connected, the mask is resized to the latent and attached as its noise mask."}),
+                "radius_override": ("INT", {"default": 0, "min": 0, "max": 400,
+                                            "tooltip": "High-pass radius in px, deciding which size of structure counts as detail. 0 = automatic from the image size (min(W,H)/52). Smaller finds finer texture. Very large values combined with a high feather will error."}),
+                "black_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
+                                             "tooltip": "Below this, an area counts as flat. Measured on the HIGH-PASS image, not on brightness -- typical values are 0 to 10. 0 means automatic. Setting this or white_override disables strength."}),
+                "white_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
+                                             "tooltip": "Above this, an area counts as full detail. Also high-pass contrast -- typical values are 8 to 40. 0 means automatic. Setting black_override alone falls back to 255 here and yields a near-empty mask."}),
+                # NOTE: detector is deliberately LAST. ComfyUI matches a saved
+                # workflow's widget values to widgets by position, so inserting a
+                # new one in the middle shifts every value after it -- that is how
+                # radius_override's 0 ended up in detector. New widgets go on the
+                # end so older graphs keep lining up.
                 "detector": (["guided", "high pass"], {"default": "guided",
                                                        "tooltip": "How texture is found. 'guided' uses an "
                                                        "edge-preserving low-pass, so strong edges do not "
@@ -168,13 +180,6 @@ class HighFrequencyMask:
                                                        "It finds more real texture AND protects flat areas "
                                                        "better. 'high pass' is the original plain Gaussian "
                                                        "difference, kept so older results can be reproduced."}),
-                "samples": ("LATENT", {"tooltip": "Optional. If connected, the mask is resized to the latent and attached as its noise mask."}),
-                "radius_override": ("INT", {"default": 0, "min": 0, "max": 400,
-                                            "tooltip": "High-pass radius in px, deciding which size of structure counts as detail. 0 = automatic from the image size (min(W,H)/52). Smaller finds finer texture. Very large values combined with a high feather will error."}),
-                "black_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
-                                             "tooltip": "Below this, an area counts as flat. Measured on the HIGH-PASS image, not on brightness -- typical values are 0 to 10. 0 means automatic. Setting this or white_override disables strength."}),
-                "white_override": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 255.0, "step": 1.0,
-                                             "tooltip": "Above this, an area counts as full detail. Also high-pass contrast -- typical values are 8 to 40. 0 means automatic. Setting black_override alone falls back to 255 here and yields a near-empty mask."}),
             },
         }
 
