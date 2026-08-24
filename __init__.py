@@ -232,6 +232,20 @@ class HighFrequencyMask:
               samples=None, detector="guided", radius_override=0,
               black_override=0.0, white_override=0.0, opacity=1.0, unique_id=None):
 
+        # ComfyUI's frontend sometimes sends an untouched optional widget as an
+        # explicit None instead of omitting it, which otherwise crashes the
+        # server-side float()/int() conversion before build() is even called.
+        if detector is None:
+            detector = "guided"
+        if radius_override is None:
+            radius_override = 0
+        if black_override is None:
+            black_override = 0.0
+        if white_override is None:
+            white_override = 0.0
+        if opacity is None:
+            opacity = 1.0
+
         if unique_id is not None:
             _remember(unique_id, image)
 

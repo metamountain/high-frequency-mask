@@ -45,6 +45,43 @@ function repairDetector(node) {
     }
 }
 
+// Fallbacks for the optional numeric widgets, keyed by name.
+//
+// ComfyUI's frontend can leave an *optional* widget's value at null until the
+// user actually touches it -- radius_override, black_override, white_override
+// were always exposed to this, and opacity joins them now. Queuing with a
+// null value fails server-side validation before build() ever runs
+// ("float() argument must be a string or a real number, not 'NoneType'"), so
+// this has to be fixed on the widget itself, not inside build().
+const OPTIONAL_NUMERIC_DEFAULTS = {
+    radius_override: 0,
+    black_override: 0.0,
+    white_override: 0.0,
+    opacity: 1.0,
+};
+
+// Make sure an optional widget can never serialize to null in the prompt:
+// repair its current value if it is already null/undefined/NaN, and guard
+// serializeValue (the hook ComfyUI's frontend actually reads from when
+// building the prompt) so a later reset back to null is caught too.
+function repairOptionalNumeric(node) {
+    for (const [name, fallback] of Object.entries(OPTIONAL_NUMERIC_DEFAULTS)) {
+        const w = widget(node, name);
+        if (!w) continue;
+        if (w.value === null || w.value === undefined || Number.isNaN(w.value)) {
+            w.value = fallback;
+        }
+        if (w._hfmaskGuarded) continue;
+        w._hfmaskGuarded = true;
+        const origSerialize = w.serializeValue?.bind(w);
+        w.serializeValue = async (...args) => {
+            let v = origSerialize ? await origSerialize(...args) : w.value;
+            if (v === null || v === undefined || Number.isNaN(v)) v = fallback;
+            return v;
+        };
+    }
+}
+
 app.registerExtension({
     name: "hfmask.autobutton",
 
@@ -56,12 +93,14 @@ app.registerExtension({
         nodeType.prototype.onConfigure = function () {
             onConfigure?.apply(this, arguments);
             repairDetector(this);
+            repairOptionalNumeric(this);
         };
 
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onCreated?.apply(this, arguments);
             repairDetector(this);
+            repairOptionalNumeric(this);
 
             const node = this;
             const status = { text: "" };
