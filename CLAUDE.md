@@ -126,16 +126,27 @@ that reliably attenuates the result regardless of what the other sliders are doi
 
 `/hfmask/preview` mirrors `/hfmask/auto`'s round-trip pattern: the browser posts the
 current widget values, the backend re-runs `build()` on the cached image
-(`_LAST_IMAGE`, now `{"img": tensor, "orig_edge": int}`) and returns a mask PNG, an
-overlay PNG (source tinted red where the mask would sample) and white/black/mean
-stats, all base64. `web/hfmask.js` hooks every relevant widget's `callback`, debounces
-120ms and aborts the in-flight request when a new one starts, so a fast drag does not
-queue stale frames behind the latest one.
+(`_LAST_IMAGE`, now `{"img": tensor, "orig_edge": int}`) and returns an original-image
+PNG, a mask PNG, an overlay PNG (source tinted red where the mask would sample) and
+white/black/mean stats, all base64. The node shows original and mask side by side;
+clicking the mask panel toggles it to the overlay. `web/hfmask.js` hooks every
+relevant widget's `callback`, debounces 120ms and aborts the in-flight request when a
+new one starts, so a fast drag does not queue stale frames behind the latest one.
 
 One thing this had to get right: `radius_override` is an **absolute px value tuned
 for the full-resolution image**, but the cache is capped at 512px on the short edge.
 Passing it through unscaled would make the preview look far coarser than the real
 run. The handler rescales it by `cached_edge / orig_edge` before calling `build()`.
+
+**Analysis resolution and display resolution are deliberately different.** `build()`
+still runs at the full 512px cache -- shrinking *that* to something like 192px was
+considered and rejected: at 192px a radius tuned for 1024px and one tuned for 2048px
+both round down to the same ~1px kernel, so the preview would stop showing the
+difference between settings that clearly differ at full resolution. Instead
+`_shrink_for_display()` downscales the three finished PNGs to 192px on the long edge
+*after* `build()` has already run at full cache fidelity -- the preview panel renders
+at a couple hundred px wide regardless, so there is nothing to gain from shipping
+more, and it cuts the response payload substantially.
 
 ## Corrected: `strength` is not dead above 1.4
 

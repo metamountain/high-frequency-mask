@@ -370,6 +370,28 @@ def _png_b64(arr):
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+_PREVIEW_DISPLAY_EDGE = 192
+
+
+def _shrink_for_display(arr, max_edge=_PREVIEW_DISPLAY_EDGE):
+    """Downscale a finished preview frame so its longer side is at most max_edge.
+
+    Only for the wire, after the mask has already been computed at the full
+    cache resolution -- the node's preview panel renders at a couple hundred
+    px wide regardless of what is sent, so there is nothing to gain from
+    shipping more. Shrinking the *analysis* resolution instead would be the
+    wrong fix: at ~192px a radius tuned for 1024px and one tuned for 2048px
+    both collapse to a 1px kernel, so the preview would stop showing the
+    difference between settings that clearly differ at full resolution.
+    """
+    h, w = arr.shape[:2]
+    if max(h, w) <= max_edge:
+        return arr
+    k = max_edge / max(h, w)
+    size = (max(1, round(w * k)), max(1, round(h * k)))
+    return np.array(Image.fromarray(arr).resize(size, Image.BILINEAR))
+
+
 def _remember(node_id, image):
     """Keep a small copy of the last input, for the auto button and live preview."""
     try:
@@ -536,11 +558,13 @@ try:
             tint = np.array([1.0, 0.18, 0.18], dtype=np.float32)
             alpha = (mask.numpy() * 0.55)[..., None]
             comp = ((src * (1 - alpha) + tint * alpha).clip(0, 1) * 255).astype(np.uint8)
+            src_np = (src * 255).astype(np.uint8)
 
             return web.json_response({
                 "ok": True,
-                "mask_png": _png_b64(mask_np),
-                "overlay_png": _png_b64(comp),
+                "orig_png": _png_b64(_shrink_for_display(src_np)),
+                "mask_png": _png_b64(_shrink_for_display(mask_np)),
+                "overlay_png": _png_b64(_shrink_for_display(comp)),
                 "white": round(float((mask >= 0.98).float().mean()) * 100, 1),
                 "black": round(float((mask <= 0.02).float().mean()) * 100, 1),
                 "mean": round(float(mask.mean()), 3),

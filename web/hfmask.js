@@ -110,12 +110,24 @@ app.registerExtension({
             // Declared before the button below so the button's callback can
             // trigger an immediate refresh once it has set new values.
 
-            const previewImg = document.createElement("img");
-            previewImg.style.width = "100%";
-            previewImg.style.display = "none";     // hidden until the first frame arrives
-            previewImg.style.borderRadius = "4px";
-            previewImg.style.cursor = "pointer";
-            previewImg.title = "Click to toggle mask / overlay";
+            const origImg = document.createElement("img");
+            origImg.style.width = "50%";
+            origImg.style.display = "none";        // hidden until the first frame arrives
+            origImg.style.borderRadius = "4px";
+            origImg.title = "Source (downscaled for preview)";
+
+            const maskImg = document.createElement("img");
+            maskImg.style.width = "50%";
+            maskImg.style.display = "none";
+            maskImg.style.borderRadius = "4px";
+            maskImg.style.cursor = "pointer";
+            maskImg.title = "Click to toggle mask / overlay";
+
+            const previewRow = document.createElement("div");
+            previewRow.style.display = "flex";
+            previewRow.style.gap = "4px";
+            previewRow.appendChild(origImg);
+            previewRow.appendChild(maskImg);
 
             const previewStatus = document.createElement("div");
             previewStatus.style.fontSize = "10px";
@@ -127,7 +139,7 @@ app.registerExtension({
             const previewWrap = document.createElement("div");
             previewWrap.style.display = "flex";
             previewWrap.style.flexDirection = "column";
-            previewWrap.appendChild(previewImg);
+            previewWrap.appendChild(previewRow);
             previewWrap.appendChild(previewStatus);
 
             let showOverlay = true;
@@ -135,15 +147,17 @@ app.registerExtension({
 
             function renderPreview() {
                 if (!lastPreview) return;
-                previewImg.src = "data:image/png;base64," +
+                origImg.src = "data:image/png;base64," + lastPreview.orig_png;
+                origImg.style.display = "block";
+                maskImg.src = "data:image/png;base64," +
                     (showOverlay ? lastPreview.overlay_png : lastPreview.mask_png);
-                previewImg.style.display = "block";
+                maskImg.style.display = "block";
                 previewStatus.textContent =
-                    `${showOverlay ? "overlay" : "mask"} (click to toggle) — ` +
+                    `original — ${showOverlay ? "overlay" : "mask"} (click to toggle) — ` +
                     `white ${lastPreview.white}% black ${lastPreview.black}% mean ${lastPreview.mean}`;
             }
 
-            previewImg.addEventListener("click", () => {
+            maskImg.addEventListener("click", () => {
                 showOverlay = !showOverlay;
                 renderPreview();
             });

@@ -32,10 +32,11 @@ has to have run once first — before that there is nothing to measure and the
 button says so rather than guessing.
 
 The node also shows a **live preview** that re-renders on every slider move —
-no need to queue the graph to see the effect of a change. Click the preview to
-toggle between the plain mask and an overlay (source image tinted where the
-mask would sample), which is the view that actually shows leak into flat
-areas. It works from the same cached image as the auto button, so it also
+no need to queue the graph to see the effect of a change. Original and mask sit
+side by side, so you always have the source for context; click the mask to
+toggle it to an overlay (source image tinted where the mask would sample),
+which is the view that actually shows leak into flat areas. It works from the
+same cached image as the auto button, so it also
 needs one full run first.
 
 ## Can't make the mask weaker?
