@@ -10,6 +10,8 @@ An optional LATENT input gets the mask attached as its noise mask.
 All torch -> runs on the GPU and handles whole batches.
 """
 
+import base64
+import io
 import os
 import numpy as np
 import torch
@@ -42,6 +44,14 @@ def _blur(x, sigma):
         return x
     k = _gauss1d(sigma, x.device, x.dtype)
     r = k.shape[-1] // 2
+    cap = min(x.shape[-2], x.shape[-1]) - 1     # reflect pad needs pad < dim
+    if r > cap:
+        if cap < 1:
+            return x
+        mid = k.shape[-1] // 2
+        k = k[:, :, mid - cap: mid + cap + 1]
+        k = k / k.sum()
+        r = cap
     x = F.conv2d(F.pad(x, (r, r, 0, 0), mode="reflect"), k.view(1, 1, 1, -1))
     x = F.conv2d(F.pad(x, (0, 0, r, r), mode="reflect"), k.view(1, 1, -1, 1))
     return x
@@ -86,6 +96,23 @@ def _erode(x, px):
     return -_dilate(-x, px)
 
 
+_QUANTILE_MAX = 2 ** 24 - 1    # torch.quantile's hard ceiling on input elements
+
+
+def _quantile(flat, q):
+    """torch.quantile as used here, safe past its 2**24-element ceiling.
+
+    A strided subsample keeps the estimate representative -- millions of
+    points remain even after subsampling a 4K+ image -- while staying under
+    the limit that otherwise raises RuntimeError.
+    """
+    n = flat.numel()
+    if n > _QUANTILE_MAX:
+        step = -(-n // _QUANTILE_MAX)          # ceil division
+        flat = flat[::step]
+    return torch.quantile(flat.float(), q)
+
+
 # ---------------------------------------------------------------- node
 
 class HighFrequencyMask:
@@ -99,21 +126,25 @@ class HighFrequencyMask:
         "and drift the colour while doing it. Flux Klein is especially prone to both. "
         "Masking the flat regions out stops the model touching them at all, so they "
         "keep their original tone and stay clean.\n\n"
-        "SETTINGS FOR UPSCALING. The shipped defaults are tuned too coarse for this "
-        "job -- they let roughly three times more through in flat areas than needed. "
+        "SETTINGS FOR UPSCALING. The shipped auto radius is tuned too coarse for this "
+        "job -- it lets roughly three times more through in flat areas than needed. "
         "Set radius_override to about a third of the automatic radius (5-7 at 1024px, "
-        "10-14 at 2048px) and grain_filter to 0 unless the source is grainy or JPEG. "
-        "Measured on ComfyUI generations that cuts the flat-area leak by 2x to 6x -- the "
+        "10-14 at 2048px); leave grain_filter at its default 0 unless the source is "
+        "grainy or JPEG. Measured on ComfyUI generations that cuts the flat-area leak by 2x to 6x -- the "
         "more flat area, the bigger the win -- while keeping MORE real texture. Add "
         "feather 0.5-1.0 so the mask edge does "
         "not leave a seam, and grow 0.5-1.0 so real detail keeps a margin.\n\n"
         "Going finer than a third buys nothing -- protection plateaus there while "
         "texture retention starts dropping.\n\n"
-        "TWO THINGS THAT MISLEAD. grain_filter defaults to 1.0, which smooths away real "
-        "texture on clean renders before it is ever measured. And black_override and "
-        "white_override are measured on the HIGH-PASS image, not on brightness: useful "
-        "values sit near 0-30, not 0-255, and setting either one switches off the "
-        "automatic levels so strength stops mattering.\n\n"
+        "CAN'T MAKE IT WEAKER? grow re-dilates the mask as fast as strength shrinks "
+        "it, so pulling strength down alone often does nothing visible once grow is "
+        "above 0. opacity is the fix: it caps the mask after grow and feather have "
+        "run, so it reliably weakens the result even when the other sliders fight "
+        "each other.\n\n"
+        "ONE THING THAT MISLEADS. black_override and white_override are measured on "
+        "the HIGH-PASS image, not on brightness: useful values sit near 0-30, not "
+        "0-255, and setting either one switches off the automatic levels so strength "
+        "stops mattering.\n\n"
         "The info output reports the values actually used, so you can read them off a "
         "good frame and pin them for a whole batch or video."
     )
@@ -154,8 +185,8 @@ class HighFrequencyMask:
                                    "tooltip": "Expands the white areas so detail keeps a safety margin. Negative values shrink the mask instead."}),
                 "feather": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
                                       "tooltip": "Softness of the edge between white and black. Higher = longer fade and no visible mask border."}),
-                "grain_filter": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 4.00, "step": 0.05,
-                                           "tooltip": "Smooths grain and JPEG artifacts before analysis, so a noisy sky is still recognised as flat. Set to 0 for clean renders and upscales -- on a noise-free source it removes real texture and weakens the mask."}),
+                "grain_filter": ("FLOAT", {"default": 0.00, "min": 0.00, "max": 4.00, "step": 0.05,
+                                           "tooltip": "Smooths grain and JPEG artifacts before analysis, so a noisy sky is still recognised as flat. Default 0 suits clean renders and upscales. Raise it for grainy or JPEG sources -- on a noise-free source, smoothing before analysis removes real texture and weakens the mask."}),
                 "invert": ("BOOLEAN", {"default": False, "tooltip": "Swaps black and white: protects the detail and samples the flat areas instead."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
@@ -180,6 +211,14 @@ class HighFrequencyMask:
                                                        "It finds more real texture AND protects flat areas "
                                                        "better. 'high pass' is the original plain Gaussian "
                                                        "difference, kept so older results can be reproduced."}),
+                # NOTE: also last, for the same reason -- appended after detector
+                # so it never shifts an existing widget's position.
+                "opacity": ("FLOAT", {"default": 1.00, "min": 0.00, "max": 1.00, "step": 0.02,
+                                      "tooltip": "Caps how strong the mask can get, applied after everything "
+                                      "else. 1.0 = full effect. Lower this when grow/strength alone will not "
+                                      "make the mask weak enough -- grow dilates white back in as fast as "
+                                      "strength shrinks it, so this is the only control that reliably "
+                                      "attenuates the whole mask."}),
             },
         }
 
@@ -191,7 +230,7 @@ class HighFrequencyMask:
 
     def build(self, image, strength, grow, feather, grain_filter, invert,
               samples=None, detector="guided", radius_override=0,
-              black_override=0.0, white_override=0.0, unique_id=None):
+              black_override=0.0, white_override=0.0, opacity=1.0, unique_id=None):
 
         if unique_id is not None:
             _remember(unique_id, image)
@@ -230,8 +269,8 @@ class HighFrequencyMask:
             else:
                 pw = float(np.clip(99.0 - (strength - 0.40) * (99.0 - 62.0) / 1.60, 62.0, 99.0))
                 pb = float(np.clip(68.0 + (1.00 - strength) * 8.0, 50.0, 90.0))
-                blk = torch.quantile(flat.float(), pb / 100.0).item()
-                wht = max(blk + 0.03, torch.quantile(flat.float(), pw / 100.0).item())
+                blk = _quantile(flat, pb / 100.0).item()
+                wht = max(blk + 0.03, _quantile(flat, pw / 100.0).item())
 
             m = ((h - blk) / max(wht - blk, 1e-6)).clamp(0, 1)
 
@@ -246,6 +285,9 @@ class HighFrequencyMask:
             if invert:
                 m = 1.0 - m
 
+            if opacity < 1.0:
+                m = m * opacity
+
             masks.append(m)
             stats.append((float(m[0, 0, : max(1, H // 6)].mean()), float(m.mean()),
                           blk * 255.0, wht * 255.0))
@@ -256,6 +298,8 @@ class HighFrequencyMask:
         info = (f"{W}x{H} x{B} | {detector} | radius {base} | grow {int(round(base * 1.5 * grow))}px | "
                 f"blur {base * 0.5 * feather:.0f}px | black {s0[2]:.0f} white {s0[3]:.0f} | "
                 f"top {s0[0]:.3f} | mean {s0[1]:.3f}")
+        if opacity < 1.0:
+            info += f" | opacity {opacity:.2f}"
         if B > 1:
             info += " | " + " ".join(f"[{i + 1}] top {s[0]:.3f}" for i, s in enumerate(stats))
 
@@ -267,7 +311,11 @@ class HighFrequencyMask:
             mm = F.interpolate(mask.unsqueeze(1), size=(sh[2], sh[3]),
                                mode="bilinear", align_corners=False).squeeze(1)
             if mm.shape[0] != sh[0]:
-                mm = mm[:1].repeat(sh[0], 1, 1) if mm.shape[0] == 1 else mm[:sh[0]]
+                if mm.shape[0] < sh[0]:
+                    reps = -(-sh[0] // mm.shape[0])        # ceil division
+                    mm = mm.repeat(reps, 1, 1)[:sh[0]]
+                else:
+                    mm = mm[:sh[0]]
             out_latent["noise_mask"] = mm
         else:
             out_latent = {"samples": torch.zeros((1, 4, 8, 8))}
@@ -301,16 +349,24 @@ _LAST_IMAGE = {}
 _CACHE_EDGE = 512
 
 
+def _png_b64(arr):
+    """Encode an HxW or HxWx3 uint8 array as a base64 PNG, for the live preview."""
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG", compress_level=3)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def _remember(node_id, image):
-    """Keep a small copy of the last input, for the auto button."""
+    """Keep a small copy of the last input, for the auto button and live preview."""
     try:
         x = image[:1].movedim(-1, 1).float()
         h, w = x.shape[-2], x.shape[-1]
-        if min(h, w) > _CACHE_EDGE:
-            k = _CACHE_EDGE / min(h, w)
+        orig_edge = min(h, w)
+        if orig_edge > _CACHE_EDGE:
+            k = _CACHE_EDGE / orig_edge
             x = F.interpolate(x, size=(max(1, round(h * k)), max(1, round(w * k))),
                               mode="area")
-        _LAST_IMAGE[str(node_id)] = x.movedim(1, -1).cpu()
+        _LAST_IMAGE[str(node_id)] = {"img": x.movedim(1, -1).cpu(), "orig_edge": orig_edge}
         if len(_LAST_IMAGE) > 32:                      # do not grow without bound
             _LAST_IMAGE.pop(next(iter(_LAST_IMAGE)))
     except Exception:
@@ -401,18 +457,80 @@ try:
         except Exception:
             data = {}
         node_id = str(data.get("node_id", ""))
-        img = _LAST_IMAGE.get(node_id)
-        if img is None:
+        cached = _LAST_IMAGE.get(node_id)
+        if cached is None:
             return web.json_response(
                 {"ok": False,
                  "message": "No image yet — run the graph once, then press again."})
         try:
-            out = _suggest(img,
+            out = _suggest(cached["img"],
                            float(data.get("grow", 0.5)),
                            float(data.get("feather", 1.0)),
                            str(data.get("detector", "guided")))
             out["ok"] = True
             return web.json_response(out)
+        except Exception as exc:
+            return web.json_response({"ok": False, "message": f"{type(exc).__name__}: {exc}"})
+
+    @server.PromptServer.instance.routes.post("/hfmask/preview")
+    async def _hfmask_preview(request):
+        """Re-render the mask from the cached image at the current widget values.
+
+        Backs the node's live preview: the browser posts here on every slider
+        move and gets a mask PNG, an overlay PNG (source tinted where the mask
+        would sample) and the white/black/mean stats back. radius_override is
+        an absolute px value tuned for the full-resolution image, so it is
+        rescaled here to match the smaller cached copy -- otherwise the
+        preview would look far coarser than the real run.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        node_id = str(data.get("node_id", ""))
+        cached = _LAST_IMAGE.get(node_id)
+        if cached is None:
+            return web.json_response(
+                {"ok": False,
+                 "message": "No image yet — run the graph once, then press again."})
+        try:
+            img = cached["img"]
+            cached_edge = min(img.shape[1], img.shape[2])
+            scale = cached_edge / max(1, cached["orig_edge"])
+
+            radius_in = float(data.get("radius_override", 0) or 0)
+            radius = max(1, int(round(radius_in * scale))) if radius_in > 0 else 0
+
+            node = HighFrequencyMask()
+            out = node.build(
+                img,
+                float(data.get("strength", 1.0)),
+                float(data.get("grow", 0.5)),
+                float(data.get("feather", 1.0)),
+                float(data.get("grain_filter", 0.0)),
+                bool(data.get("invert", False)),
+                detector=str(data.get("detector", "guided")),
+                radius_override=radius,
+                black_override=float(data.get("black_override", 0.0)),
+                white_override=float(data.get("white_override", 0.0)),
+                opacity=float(data.get("opacity", 1.0)),
+            )["result"]
+            mask = out[0][0].clamp(0, 1)
+
+            mask_np = (mask.numpy() * 255).astype(np.uint8)
+            src = img[0].clamp(0, 1).numpy()
+            tint = np.array([1.0, 0.18, 0.18], dtype=np.float32)
+            alpha = (mask.numpy() * 0.55)[..., None]
+            comp = ((src * (1 - alpha) + tint * alpha).clip(0, 1) * 255).astype(np.uint8)
+
+            return web.json_response({
+                "ok": True,
+                "mask_png": _png_b64(mask_np),
+                "overlay_png": _png_b64(comp),
+                "white": round(float((mask >= 0.98).float().mean()) * 100, 1),
+                "black": round(float((mask <= 0.02).float().mean()) * 100, 1),
+                "mean": round(float(mask.mean()), 3),
+            })
         except Exception as exc:
             return web.json_response({"ok": False, "message": f"{type(exc).__name__}: {exc}"})
 except Exception:

@@ -13,7 +13,7 @@ import torch
 
 from helpers import load_node, photo, protection, build_mask, IMAGES
 
-XFAIL = {"quantile_ceiling", "reflect_pad_overflow", "latent_batch_mismatch"}
+XFAIL = set()
 
 
 def test_happy_path():
