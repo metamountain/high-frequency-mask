@@ -64,10 +64,12 @@ Two independent causes, both worth fixing in code rather than documentation:
 
 - **The auto radius is ~3× too coarse.** Leak falls monotonically with radius and
   plateaus below 0.3×; texture retention peaks at 0.25–0.35×. So `min(W,H)/52` should
-  be closer to `min(W,H)/150`. In px: 5–7 at 1024, 10–14 at 2048.
-- **`grain_filter` defaults to 1.0**, which pre-smooths the image before anything is
-  measured. On clean renders that costs 60% more leak *and* removes real texture. It
-  should default to 0 and only be raised for grainy or JPEG sources.
+  be closer to `min(W,H)/150`. In px: 5–7 at 1024, 10–14 at 2048. **Still open** —
+  changing it moves every saved mask, so it stays a documented `radius_override`
+  recommendation rather than a new default for now.
+- ~~**`grain_filter` defaults to 1.0**~~ **Fixed.** It pre-smooths the image before
+  anything is measured, which on clean renders cost 60% more leak *and* removed real
+  texture. Default is now 0; raise it only for grainy or JPEG sources.
 
 Full tables: `docs/upscale-settings.md`.
 
@@ -96,16 +98,44 @@ They are also a hidden mode switch: if *either* is > 0 the quantile autolevel is
 bypassed entirely and `strength` becomes a no-op. Black-only input silently falls back
 to `white = 255` and yields a near-empty mask.
 
-## Known breakage (reproduced in `tests/test_regressions.py`)
+## Fixed breakage (was reproduced in `tests/test_regressions.py`, now XFAIL-free)
 
-- **`torch.quantile` caps at 2^24 = 16,777,216 elements** (`:130`). Images at or above
-  ~4096×4096 raise `RuntimeError: quantile() input tensor is too large`. **Reachable
-  on a normal upscale** — two files in this install's `input/` already exceed it.
-- **Reflect-pad overflow** (`:141`). `_blur` needs `1.5 * base * feather < min(W,H)`.
-  Clamp `r` to `min(W,H) - 1`.
-- **Latent batch mismatch falls through** (`:167`). The guard only handles
-  `mm.shape[0] == 1`; for `1 < mask_batch < latent_batch` the `mm[:sh[0]]` slice is a
-  no-op and a wrong-sized `noise_mask` reaches the sampler.
+- **`torch.quantile` caps at 2^24 = 16,777,216 elements.** Images at or above
+  ~4096×4096 raised `RuntimeError: quantile() input tensor is too large` — reachable
+  on a normal upscale. Fixed by `_quantile()`: strided subsample down to under the
+  cap before calling `torch.quantile`, keeping millions of points either way.
+- **Reflect-pad overflow.** `_blur` needed `1.5 * base * feather < min(W,H)`. Fixed
+  by clamping the kernel radius to `min(H,W) - 1` (and renormalising the truncated
+  kernel) inside `_blur` itself, so no caller has to reason about it.
+- **Latent batch mismatch fell through.** The guard only handled `mm.shape[0] == 1`;
+  for `1 < mask_batch < latent_batch` the `mm[:sh[0]]` slice was a no-op and a
+  wrong-sized `noise_mask` reached the sampler. Fixed by tiling `mm` up to
+  `latent_batch` with `repeat` before slicing, which also subsumes the old
+  batch-of-1 special case.
+
+## Weakening the mask: opacity
+
+`strength` looked "stuck" for users because `grow` re-dilates white back out as fast
+as `strength` shrinks it — the two sliders fight, and past a point `strength` has
+no visible effect. `opacity` (new, appended last in `optional` so it cannot shift any
+saved graph's widget positions) multiplies the finished mask *after* grow, feather and
+invert have all run: `m = m * opacity` when `opacity < 1.0`. It is the one control
+that reliably attenuates the result regardless of what the other sliders are doing.
+
+## Live preview
+
+`/hfmask/preview` mirrors `/hfmask/auto`'s round-trip pattern: the browser posts the
+current widget values, the backend re-runs `build()` on the cached image
+(`_LAST_IMAGE`, now `{"img": tensor, "orig_edge": int}`) and returns a mask PNG, an
+overlay PNG (source tinted red where the mask would sample) and white/black/mean
+stats, all base64. `web/hfmask.js` hooks every relevant widget's `callback`, debounces
+120ms and aborts the in-flight request when a new one starts, so a fast drag does not
+queue stale frames behind the latest one.
+
+One thing this had to get right: `radius_override` is an **absolute px value tuned
+for the full-resolution image**, but the cache is capped at 512px on the short edge.
+Passing it through unscaled would make the preview look far coarser than the real
+run. The handler rescales it by `cached_edge / orig_edge` before calling `build()`.
 
 ## Corrected: `strength` is not dead above 1.4
 
