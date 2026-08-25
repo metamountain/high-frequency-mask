@@ -1,0 +1,37 @@
+# Publishes this node to the Comfy Registry (registry.comfy.org) whenever
+# pyproject.toml changes on main. This is the actual mechanism that makes a
+# custom node discoverable through ComfyUI-Manager's node search -- without
+# it, the repo is only reachable by someone who already has the direct
+# GitHub link.
+#
+# One-time setup, by a human, before this can run successfully:
+#   1. Create an account at https://registry.comfy.org and claim a publisher.
+#   2. Put that publisher's id into `PublisherId` in pyproject.toml.
+#   3. Generate a Personal Access Token on the registry site.
+#   4. Add it as this repo's REGISTRY_ACCESS_TOKEN secret:
+#      Settings -> Secrets and variables -> Actions -> New repository secret.
+# After that, any push to main that touches pyproject.toml (e.g. bumping
+# `version`) publishes a new release automatically.
+name: Publish to Comfy registry
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "pyproject.toml"
+
+permissions:
+  issues: write
+
+jobs:
+  publish-node:
+    name: Publish Custom Node to registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Publish Custom Node
+        uses: Comfy-Org/publish-node-action@v1
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
