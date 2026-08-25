@@ -85,14 +85,6 @@ to the overlay. No need to queue the graph to see what a slider does.
 
 ![live preview](docs/live-preview.png)
 
-## The settings grid
-
-Generated from the node itself, so the numbers under each tile are what you will
-actually get. Rows are `radius_override`, columns are `strength`; everything else at
-the shipped defaults. Regenerate with `docs/make_grid.py`.
-
-![settings](docs/settings-grid.jpg)
-
 ## How it finds texture
 
 `detector` chooses between two ways of measuring detail:
