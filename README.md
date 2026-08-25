@@ -147,18 +147,6 @@ Each was pinned by a regression test — see [CLAUDE.md](CLAUDE.md) for the anal
 - `black_override` / `white_override` are **high-pass contrast**, not brightness —
   useful values are near 0–30 — and setting either silently disables `strength`
 
-## Tests
-
-`pytest` is not installed in the ComfyUI portable python, so the suite runs standalone:
-
-```bash
-python_embeded/python.exe ComfyUI/custom_nodes/high-frequency-mask/tests/run_tests.py
-```
-
-Known bugs are `XFAIL`, so the suite is green today and turns red when one is fixed
-without being deregistered. `tests/test_radius.py` run directly prints the radius
-tables. Full measurements: **[docs/upscale-settings.md](docs/upscale-settings.md)**.
-
 ## Install
 
 Clone into `ComfyUI/custom_nodes/` and restart ComfyUI. No dependencies beyond ComfyUI.
