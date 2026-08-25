@@ -180,3 +180,29 @@ ComfyUI 0.33.1, frontend 1.48.7, torch 2.12.1+cu130. `pytest` is **not** install
 
 `custom_nodes/` is gitignored by ComfyUI (`.gitignore:8`), so this directory is
 free-standing and safe as its own repo.
+
+## Discoverability: not on the Comfy Registry yet
+
+This is why almost nobody has found the node -- it was only ever reachable via a
+direct GitHub link, never through ComfyUI-Manager's search, because it was never
+published to the registry.
+
+`.github/workflows/publish.yml` now auto-publishes on every push to `main` that
+touches `pyproject.toml`, using `Comfy-Org/publish-node-action@v1`. It cannot run
+successfully yet -- two things only a human with registry access can do:
+
+1. Create an account at <https://registry.comfy.org>, claim a publisher, and put its
+   id into `PublisherId` in `pyproject.toml` (currently empty).
+2. Generate a Personal Access Token there and add it as this repo's
+   `REGISTRY_ACCESS_TOKEN` secret (Settings → Secrets and variables → Actions).
+
+After both are done, bumping `version` in `pyproject.toml` and pushing to `main`
+publishes a new release automatically. `pyproject.toml` also lost its empty
+`Icon = ""` -- an empty string may fail the registry's URL validation, so the field
+is left unset until there is a real icon to point at.
+
+Separately, and out of this repo's scope: ComfyUI-Manager also has its own
+community-maintained `custom-node-list.json` at
+[ltdrdata/ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager), updated via
+PRs from the community rather than automatically from the registry. Worth a PR there
+too once the registry listing exists.
