@@ -13,4 +13,4 @@ Repository = "https://github.com/metamountain/high-frequency-mask"
 # Claim a publisher at https://registry.comfy.org and put its id here --
 # .github/workflows/publish.yml cannot publish without it.
 PublisherId = ""
-DisplayName = "High Frequency Mask"
+DisplayName = "High Frequency Mask — ComfyUI Custom Node"
