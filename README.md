@@ -1,4 +1,4 @@
-# High Frequency Mask
+# High Frequency Mask — a ComfyUI Custom Node
 
 **Stops an upscaler wrecking the flat parts of your image.**
 
