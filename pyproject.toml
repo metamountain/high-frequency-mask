@@ -1,5 +1,5 @@
 [project]
-name = "high-frequency-mask"
+name = "comfyui-high-frequency-mask"
 description = "ComfyUI custom node that protects flat, smooth regions (sky, walls, skin) from upscaler hallucination and colour drift -- an edge-preserving high-frequency mask for upscale and refine passes."
 version = "0.1.0"
 license = { file = "LICENSE" }
