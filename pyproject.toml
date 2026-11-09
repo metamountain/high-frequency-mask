@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-high-frequency-mask"
 description = "ComfyUI custom node that protects flat, smooth regions (sky, walls, skin) from upscaler hallucination and colour drift -- an edge-preserving high-frequency mask for upscale and refine passes."
-version = "0.1.0"
+version = "1.0.0"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = []
@@ -10,7 +10,6 @@ dependencies = []
 Repository = "https://github.com/metamountain/high-frequency-mask"
 
 [tool.comfy]
-# Claim a publisher at https://registry.comfy.org and put its id here --
-# .github/workflows/publish.yml cannot publish without it.
-PublisherId = ""
-DisplayName = "High Frequency Mask — ComfyUI Custom Node"
+PublisherId = "metamountain"
+DisplayName = "High Frequency Mask"
+Icon = "https://raw.githubusercontent.com/metamountain/high-frequency-mask/main/assets/icon.png"
